@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Menu AR</title>
+<script src="dishes.js"></script>
+<!-- The menu page loads nothing heavy. On a dish page the 3D viewer loads first (see the script below), so the dish appears quickly. The camera/AR engine (A-Frame + MindAR) loads afterwards in the background. -->
+<link rel="preconnect" href="https://aframe.io">
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<style>
+  /* IMPORTANT: no background on html/body, or it hides the camera feed */
+  html, body { margin: 0; height: 100%; background: transparent; color: #fff; font-family: system-ui, sans-serif; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; }
+  .a-enter-vr, .a-enter-ar { display: none !important; }
+  .screen { position: fixed; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center;
+            padding: 24px; text-align: center; background: #1c1410; z-index: 20; }
+  .screen.on { display: flex; }
+  h1 { font-size: 1.6rem; margin: 0 0 8px; }
+  p { max-width: 30ch; line-height: 1.5; color: #e8d9cc; margin: 0 0 20px; }
+  button { font: inherit; font-weight: 600; border: 0; border-radius: 999px; padding: 14px 28px; margin: 6px;
+           background: #e8452c; color: #fff; }
+  button.plain { background: transparent; border: 1px solid #8a7466; color: #e8d9cc; }
+  button:disabled { opacity: .55; }
+  #errmsg { max-width: 36ch; }
+  #errcode { font-size: .75rem; opacity: .7; max-width: 36ch; word-break: break-word; }
+  button:focus-visible { outline: 3px solid #ffd27a; outline-offset: 2px; }
+  #hint { position: fixed; left: 0; right: 0; bottom: 24px; text-align: center; z-index: 10; pointer-events: none;
+          text-shadow: 0 1px 4px #000; transition: opacity .3s; }
+  #hud { position: fixed; top: 12px; right: 12px; z-index: 15; display: none; }
+  #hud button { padding: 8px 16px; background: rgba(0,0,0,.55); font-size: .9rem; }
+  button.alt { background: #fff; color: #1c1410; }
+  #start { padding: 0; justify-content: flex-end; }
+  #start model-viewer { position: absolute; inset: 0; width: 100%; height: 100%; --poster-color: transparent;
+                        background: radial-gradient(circle at 50% 42%, #3a2a20, #1c1410 70%); }
+  #start .top { position: absolute; top: 0; left: 0; right: 0; z-index: 2; pointer-events: none;
+                padding: calc(28px + env(safe-area-inset-top, 0px)) 24px 0; text-shadow: 0 1px 6px #000; }
+  #start .top p { margin: 0 auto; }
+  #start .ui { position: relative; z-index: 2; width: 100%; box-sizing: border-box; display: flex; flex-direction: column;
+               align-items: center; pointer-events: none;
+               padding: 80px 24px calc(24px + env(safe-area-inset-bottom, 0px));
+               background: linear-gradient(transparent, rgba(28,20,16,.92) 55%); }
+  #start .ui button { pointer-events: auto; width: min(100%, 320px); box-sizing: border-box; }
+  #start .back3d { display: none; position: absolute; left: 0; right: 0; top: 0; z-index: 3; justify-content: space-between;
+                   pointer-events: none; padding: calc(12px + env(safe-area-inset-top, 0px)) 12px 0; }
+  #start .back3d button { pointer-events: auto; padding: 10px 18px; }
+  #start.only3d .top, #start.only3d .ui { display: none; }
+  #start.only3d .back3d { display: flex; }
+  #start .row { display: flex; gap: 8px; width: min(100%, 320px); pointer-events: auto; }
+  #start .row button { width: auto; flex: 1; padding: 12px 8px; }
+  button.wa { background: #1fa855; }
+  #sheet { display: none; position: absolute; inset: 0; z-index: 5; background: rgba(0,0,0,.6); align-items: flex-end; }
+  #sheet.on { display: flex; }
+  #sheet .card { background: #2a1e18; width: 100%; box-sizing: border-box; text-align: left; max-height: 75%; overflow: auto;
+                 padding: 24px 24px calc(24px + env(safe-area-inset-bottom, 0px)); border-radius: 20px 20px 0 0; }
+  #sheet h2 { margin: 0 0 12px; }
+  #sheet p { max-width: none; margin: 0 0 10px; }
+  /* Light theme for the start page (white background + soft shadow under the dish) */
+  #start { background: #fff; color: #222; }
+  #start model-viewer { background: #fff; }
+  #start .top { text-shadow: none; }
+  #start .top p { color: #666; }
+  #start .ui { background: linear-gradient(rgba(255,255,255,0), #fff 55%); }
+  #start button.plain { border-color: #c9c9c9; color: #333; }
+  #start button.alt { background: #fff; color: #1a1a1a; border: 1px solid #c9c9c9; }
+  #sheet { background: rgba(0,0,0,.35); }
+  #sheet .card { background: #fff; color: #222; box-shadow: 0 -4px 24px rgba(0,0,0,.15); }
+  #sheet p { color: #444; }
+  /* Layout v2: title on top, 3D model in the middle, buttons at the bottom (nothing overlaps the dish) */
+  #start .top { position: static; order: -1; width: 100%; box-sizing: border-box; padding: calc(20px + env(safe-area-inset-top, 0px)) 24px 0; }
+  #start model-viewer { position: relative; inset: auto; flex: 1 1 0; min-height: 0; align-self: stretch; width: auto; height: auto; }
+  #start.only3d model-viewer { flex: 1 1 100%; }
+  #start .ui { padding: 8px 24px calc(32px + env(safe-area-inset-bottom, 0px)); background: none; }
+  #start .ui button { padding: 13px 24px; }
+  #start .ui #go { padding: 15px 24px; }
+  #start .ui .wa, #start .ui #info { background: none; border: 0; color: #1a8f4a; padding: 8px; width: auto; font-size: .95rem; }
+  #start .ui #info { color: #555; text-decoration: underline; }
+  /* Poster picture: a normal image shown instantly, while the 3D viewer is still loading */
+  #posterimg { position: absolute; z-index: 1; object-fit: contain; pointer-events: none; background: #fff; transition: opacity .35s; }
+  /* "Menu" link on a dish page */
+  #menulink { display: none; position: absolute; left: 12px; top: calc(12px + env(safe-area-inset-top, 0px)); z-index: 4;
+              font-size: .9rem; color: #444; background: rgba(255,255,255,.92); border: 1px solid #ddd; border-radius: 999px;
+              padding: 6px 14px; text-decoration: none; }
+  #start.only3d #menulink { display: none !important; }
+  /* Loading bar for the 3D dish */
+  #bar { position: absolute; top: 0; left: 0; right: 0; height: 3px; z-index: 6; pointer-events: none; }
+  #bar i { display: block; height: 100%; width: 0; background: #e8452c; transition: width .25s; }
+</style>
+</head>
+<body>
+
+<!-- 1. Start screen: live 3D preview of the dish + ways to view it -->
+<div class="screen on" id="start">
+  <div id="bar"><i></i></div>
+  <a id="menulink" href="./">&#8249; Menu</a>
+
+  <!-- max-camera-orbit: the camera can go from straight above down to just above the table, never below the dish -->
+  <model-viewer id="mv" alt="3D dish" camera-controls auto-rotate interaction-prompt="none" disable-pan
+                max-camera-orbit="auto 87deg auto"
+                ar ar-modes="scene-viewer quick-look" shadow-intensity="1" shadow-softness="0.9" exposure="1.1" loading="eager">
+    <button slot="ar-button" style="display:none"></button>
+  </model-viewer>
+
+  <div class="top">
+    <h1 id="dname">See your dish in 3D</h1>
+    <p id="price" style="display:none"></p>
+    <p id="sub">Loading your 3D dish…</p>
+  </div>
+
+  <div class="ui">
+    <button id="go">Scan the menu photo</button>
+    <button id="ar" class="alt" style="display:none">View in your space (AR)</button>
+    <button class="plain" id="skip">View 3D without camera</button>
+    <button class="wa" id="wa">Order on WhatsApp</button>
+    <button class="plain" id="info" style="display:none">Details</button>
+  </div>
+
+  <div id="sheet"><div class="card">
+    <h2 id="sname"></h2><p id="sdesc"></p><p id="sing"></p><p id="sall"></p>
+    <button class="plain" id="sclose">Close</button>
+  </div></div>
+
+  <!-- shown when "View 3D without camera" is tapped -->
+  <div class="back3d">
+    <button class="plain" id="back">Back</button>
+    <button id="ar2" class="alt" style="display:none">View in your space (AR)</button>
+  </div>
+</div>
+
+<!-- 3. Error message -->
+<div class="screen" id="error">
+  <h1 id="errtitle">Camera not available</h1>
+  <p id="errmsg">Allow camera access in your browser, or view the dish in 3D instead.</p>
+  <p id="errcode"></p>
+  <button id="errretry">Try again</button>
+  <button class="plain" id="err3d">View 3D</button>
+</div>
+
+<div id="hud"><button id="detach">Detach</button><button id="mode" style="display:none">Drag: Rotate</button><button id="hud3d">3D view</button></div>
+<div id="hint"></div>
+
+<script>
+(function () {
+  const $ = id => document.getElementById(id);
+
+  // If dishes.js has a typing mistake (usually a missing comma), say so instead of staying on "Loading..." forever
+  if (typeof DISHES === 'undefined' || typeof RESTAURANT === 'undefined') {
+    $('sub').textContent = 'Menu file problem: dishes.js has a typing mistake (usually a missing comma). Check the last line you edited.';
+    $('sub').style.color = '#c0392b'; $('bar').style.display = 'none'; $('go').style.display = 'none';
+    return;
+  }
+
+  // ---------- Which dish? (?item=... from the QR link) ----------
+  const key = new URLSearchParams(location.search).get('item');
+  const DISH = DISHES[key];
+  if (!DISH) { showMenuPage(key); return; }
+
+  // Load the 3D viewer only on a dish page (the menu page does not need it)
+  { const vs = document.createElement('script'); vs.type = 'module';
+    vs.src = 'https://ajax.googleapis.com/ajax/libs/model-viewer/3.5.0/model-viewer.min.js'; document.head.appendChild(vs); }
+
+  // ---------- The menu page: one QR code opens this, the customer taps a dish ----------
+  function showMenuPage(missingKey) {
+    const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    document.documentElement.style.cssText = 'height:auto;overflow:auto;touch-action:auto;background:#fff';
+    document.body.style.cssText = 'height:auto;overflow:auto;touch-action:auto;user-select:auto;-webkit-user-select:auto;background:#fff;color:#222';
+    document.body.innerHTML = '';
+    const css = document.createElement('style');
+    css.textContent = '.hub{max-width:680px;margin:0 auto;padding:calc(28px + env(safe-area-inset-top,0px)) 16px 48px}' +
+      '.hub h1{font-size:1.7rem;margin:0 0 6px;text-align:center;color:#1a1a1a}' +
+      '.hub .lead{color:#666;text-align:center;margin:0 auto 22px;max-width:34ch;line-height:1.5}' +
+      '.hub .warn{background:#fff4e5;color:#8a5a00;border-radius:12px;padding:10px 14px;margin:0 0 16px;text-align:center}' +
+      '.hub .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}' +
+      '@media(min-width:560px){.hub .grid{grid-template-columns:repeat(3,1fr)}}' +
+      '.hub a.card{display:block;text-decoration:none;color:inherit;border:1px solid #e6e6e6;border-radius:16px;overflow:hidden;background:#fff;box-shadow:0 1px 6px rgba(0,0,0,.06)}' +
+      '.hub .pic{aspect-ratio:1/1;background:#fafafa;display:flex;align-items:center;justify-content:center}' +
+      '.hub .pic img{width:100%;height:100%;object-fit:contain}' +
+      '.hub .pic span{font-size:2.4rem}' +
+      '.hub .info{padding:10px 12px 12px}' +
+      '.hub .nm{font-weight:600;font-size:1rem;margin:0;color:#1a1a1a}' +
+      '.hub .pr{color:#666;font-size:.9rem;margin:2px 0 0}' +
+      '.hub .tag{display:inline-block;margin-top:8px;font-size:.8rem;color:#e8452c;font-weight:600}';
+    document.head.appendChild(css);
+    const mk = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text) e.textContent = text; return e; };
+    const wrap = mk('div', 'hub');
+    wrap.appendChild(mk('h1', '', RESTAURANT.name || 'Menu'));
+    wrap.appendChild(mk('div', 'lead', ios ? 'Tap a dish, then "View in your space" to put it on your table.'
+                                           : 'Tap a dish to see it in 3D, or scan its photo on the menu with your camera.'));
+    if (missingKey) wrap.appendChild(mk('div', 'warn', 'That dish was not found. Please choose from the menu below.'));
+    const grid = mk('div', 'grid');
+    Object.keys(DISHES).forEach(k => {
+      const d = DISHES[k];
+      const a = mk('a', 'card'); a.href = '?item=' + encodeURIComponent(k);
+      const pic = mk('div', 'pic');
+      if (d.poster) { const im = new Image(); im.alt = d.name; im.loading = 'lazy'; im.decoding = 'async'; im.src = d.poster; pic.appendChild(im); }
+      else pic.appendChild(mk('span', '', '🍽'));
+      const info = mk('div', 'info');
+      info.appendChild(mk('p', 'nm', d.name));
+      if (d.price) info.appendChild(mk('p', 'pr', d.price));
+      info.appendChild(mk('span', 'tag', 'View in 3D ›'));
+      a.appendChild(pic); a.appendChild(info); grid.appendChild(a);
+    });
+    wrap.appendChild(grid);
+    document.body.appendChild(wrap);
+    document.title = RESTAURANT.name || 'Menu';
+  }
+
+  // ---------- Settings you may change ----------
+  const SHOW_AR_ON_ANDROID = false;       // Android: off. The phone check is not reliable enough (set true to experiment)
+  const PRELOAD_AR_ON_IOS = false;        // iPhone mostly uses "View in your space", so the camera engine loads only when needed
+  const HIDE_BOTTOM_IN_AR = true;         // false = never limit the tilt in the camera view (the 3D page still hides the bottom)
+  const MIN_ELEVATION_SIN = 0.05;         // how far above the dish's base the viewer must stay (0.05 = about 3 degrees)
+
+  // ---------- Page text, info sheet, order button ----------
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  document.title = DISH.name + ' · ' + RESTAURANT.name;
+  $('dname').textContent = DISH.name;
+  if (DISH.price) { $('price').textContent = DISH.price; $('price').style.display = ''; }
+  $('wa').onclick = () => window.open('https://wa.me/' + RESTAURANT.whatsapp + '?text=' + encodeURIComponent('Hi, I would like to order: ' + DISH.name), '_blank');
+  [['sdesc', DISH.description, ''], ['sing', DISH.ingredients, 'Ingredients: '], ['sall', DISH.allergens, 'Allergens: ']].forEach(([id, v, pre]) => {
+    $(id).textContent = v ? pre + v : ''; $(id).style.display = v ? '' : 'none';
+  });
+  $('sname').textContent = DISH.name + (DISH.price ? ' · ' + DISH.price : '');
+  if (DISH.description || DISH.ingredients || DISH.allergens) $('info').style.display = '';
+  $('info').onclick = () => $('sheet').classList.add('on');
+  $('sclose').onclick = () => $('sheet').classList.remove('on');
+  if (!RESTAURANT.whatsapp) $('wa').style.display = 'none';   // clear the number in dishes.js to hide the button
+
+  if (Object.keys(DISHES).length > 1) { $('menulink').style.display = 'block'; $('menulink').href = location.pathname; }   // back to the menu page
+
+  if (isIOS) {   // iPhone: AR button goes first and becomes the main button
+    $('ar').style.order = '-1';
+    $('ar').classList.remove('alt');
+    $('go').classList.add('alt');
+  }
+
+  const show = id => { ['start', 'error'].forEach(s => $(s).classList.toggle('on', s === id)); $('start').classList.remove('only3d'); };
+  const hint = t => { $('hint').textContent = t; };
+  function showError(title, msg, code) {
+    $('errtitle').textContent = title; $('errmsg').textContent = msg; $('errcode').textContent = code || '';
+    show('error');
+  }
+
+  // ---------- Step 1: the 3D dish (loads first) ----------
+  const mv = $('mv');
+  const modelUrl = (isIOS && DISH.glbIos) ? DISH.glbIos : DISH.glb;
+
+  // Start downloading the 3D model right now, at the same time as the 3D viewer library (not after it)
+  try {
+    const pl = document.createElement('link');
+    pl.rel = 'preload'; pl.as = 'fetch'; pl.href = modelUrl; pl.crossOrigin = 'anonymous';
+    document.head.appendChild(pl);
+  } catch (e) {}
+
+  // The poster picture is a plain image, so it appears as soon as it has downloaded (it does not wait for the 3D viewer)
+  let posterImg = null;
+  if (DISH.poster) {
+    posterImg = new Image(); posterImg.id = 'posterimg'; posterImg.alt = '';
+    posterImg.onerror = () => { if (posterImg) posterImg.remove(); posterImg = null; };
+    posterImg.src = DISH.poster;
+    $('start').appendChild(posterImg);
+    const placePoster = () => {
+      if (!posterImg) return;
+      const r = mv.getBoundingClientRect();
+      Object.assign(posterImg.style, { left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', height: r.height + 'px' });
+    };
+    placePoster(); setTimeout(placePoster, 300);
+    addEventListener('resize', placePoster);
+    if (window.ResizeObserver) new ResizeObserver(placePoster).observe(mv);
+  }
+  const dropPoster = () => { if (!posterImg) return; const p = posterImg; posterImg = null; p.style.opacity = '0'; setTimeout(() => p.remove(), 400); };
+
+  let xrOK = false;
+  const checkAR = () => {
+    const ok = mv.canActivateAR && (isIOS || (SHOW_AR_ON_ANDROID && xrOK));
+    $('ar').style.display = ok ? '' : 'none';
+    $('ar2').style.display = ok ? '' : 'none';
+  };
+  // The "View in your space" buttons stay hidden until the model has loaded, so they cannot be tapped too early.
+  $('ar').onclick = $('ar2').onclick = () => { if (mv.canActivateAR) mv.activateAR(); };
+
+  if (DISH.usdz) mv.setAttribute('ios-src', DISH.usdz);          // optional: ready-made iPhone file (usdz: '...' in dishes.js)
+  if (DISH.arScale) mv.setAttribute('scale', DISH.arScale);      // optional: resize the dish in AR (arScale: '2 2 2' in dishes.js)
+
+  mv.addEventListener('progress', e => {
+    const p = (e.detail && e.detail.totalProgress) || 0;
+    $('bar').firstElementChild.style.width = Math.round(p * 100) + '%';
+    if (p < 1) $('sub').textContent = 'Loading your 3D dish… ' + Math.round(p * 100) + '%';
+  });
+  let heroFinished = false;
+  const resetGo = () => { $('go').disabled = false; $('go').textContent = 'Scan the menu photo'; };
+  // Starts downloading the camera engine. If the customer is already waiting for the camera and it fails, tell them.
+  const startEngine = () => loadEngine().catch(() => {
+    if (!wantAR) return;                 // silent background failure: the next tap on "Scan" will try again
+    wantAR = false; resetGo();
+    showError('Camera could not load', 'The camera part of this page did not finish loading. Check your internet connection and try again, or view the dish in 3D.', 'engine load failed');
+  });
+  const heroDone = () => {
+    if (heroFinished) return;
+    heroFinished = true;
+    $('bar').style.display = 'none';
+    dropPoster();
+    if (!isIOS || PRELOAD_AR_ON_IOS || wantAR) startEngine();   // the camera engine only starts after the 3D dish has finished
+  };
+  mv.addEventListener('load', () => {
+    $('sub').textContent = 'Drag to spin it · pinch to zoom';
+    checkAR(); setTimeout(checkAR, 400);
+    heroDone();
+  });
+  mv.addEventListener('error', () => {
+    $('sub').textContent = 'Point your camera at a dish photo on the menu.';
+    heroDone();
+  });
+  mv.setAttribute('src', modelUrl);   // optional: separate iPhone model (glbIos: '...' in dishes.js)
+  setTimeout(() => { if (!heroFinished && (!isIOS || PRELOAD_AR_ON_IOS || wantAR)) startEngine(); }, 25000);   // safety: do not wait forever on a very slow connection
+
+  // Android: ask the browser whether this phone supports AR (ARCore). If not, the button stays hidden.
+  if (navigator.xr && navigator.xr.isSessionSupported) {
+    navigator.xr.isSessionSupported('immersive-ar').then(v => { xrOK = !!v; checkAR(); }).catch(() => {});
+  }
+
+  // ---------- Step 2: the camera / AR engine (loads in the background) ----------
+  let scene = null, started = false, arReady = false, wantAR = false, enginePromise = null, lastArError = '';
+  const loadedScripts = {};
+  const loadScript = src => loadedScripts[src] || (loadedScripts[src] = new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = src; s.onload = res;
+    s.onerror = () => { delete loadedScripts[src]; rej(new Error('Could not load ' + src)); };
+    document.head.appendChild(s);
+  }));
+
+  function loadEngine() {
+    if (enginePromise) return enginePromise;
+    enginePromise = (async () => {
+      await loadScript('https://aframe.io/releases/1.5.0/aframe.min.js');
+      await loadScript('https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js');
+      registerHideBottom();
+      buildScene();
+      scene = $('scene');
+      await new Promise(res => { if (scene.renderStarted) res(); else scene.addEventListener('renderstart', () => res(), { once: true }); });
+      initAR();
+      arReady = true;
+      resetGo();
+      if (wantAR) { wantAR = false; startAR(); }
+    })().catch(e => { enginePromise = null; throw e; });
+    return enginePromise;
+  }
+
+  // Builds the AR scene for this dish (after the libraries have loaded)
+  function buildScene() {
+    const rot = DISH.rotation || '90 0 0', pos = DISH.position || '0 0 0.02', sc = DISH.scale || '2 2 2';
+    document.body.insertAdjacentHTML('beforeend', `
+<a-scene id="scene"
+         mindar-image="imageTargetSrc: ${DISH.mind}; autoStart: false; uiLoading: no; uiScanning: no; uiError: no; maxTrack: 1; filterMinCF: 0.0001; filterBeta: 0.001;"
+         color-space="sRGB" renderer="colorManagement: true; physicallyCorrectLights: true"
+         vr-mode-ui="enabled: false" device-orientation-permission-ui="enabled: false">
+  <a-assets><a-asset-item id="dish" src="${DISH.glb}"></a-asset-item></a-assets>
+  <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+  <a-light type="ambient" intensity="1.2"></a-light>
+  <a-light type="directional" intensity="1" position="0.5 1 1"></a-light>
+  <a-entity id="t0" mindar-image-target="targetIndex: 0">
+    <a-entity id="pop" hide-bottom scale="0.001 0.001 0.001"
+              animation__pop="property: scale; from: 0.001 0.001 0.001; to: 1 1 1; dur: 1500; easing: easeOutBack; startEvents: popstart"
+              animation__spin="property: rotation; from: 0 0 0; to: 0 0 360; dur: 1500; easing: easeOutCubic; startEvents: popstart">
+      <a-entity id="zoom"><a-entity id="tilt"><a-entity id="spin">
+        <a-gltf-model src="#dish" rotation="${rot}" position="${pos}" scale="${sc}"></a-gltf-model>
+      </a-entity></a-entity></a-entity>
+    </a-entity>
+  </a-entity>
+</a-scene>`);
+  }
+
+  // Runs every frame: keeps the camera from ever seeing the underside of the dish
+  function registerHideBottom() {
+    AFRAME.registerComponent('hide-bottom', { tick() { try { if (window.__limitTilt) window.__limitTilt(); } catch (e) {} } });
+  }
+
+  // ---------- Starting the camera ----------
+  const sys = () => scene.systems['mindar-image-system'];
+  const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
+  const hasWebGL = () => { try { const c = document.createElement('canvas'); return !!(c.getContext('webgl') || c.getContext('experimental-webgl')); } catch (e) { return false; } };
+
+  // After a failure, test the camera directly so we can tell "camera problem" from "AR engine problem"
+  async function diagnose(e) {
+    const base = 'webgl:' + (hasWebGL() ? 'yes' : 'no');
+    try {
+      const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      s.getTracks().forEach(t => t.stop());
+      return { cam: true, code: base + ' · ' + (lastArError || (e && (e.name || e.message)) || 'unknown') };
+    } catch (ce) {
+      return { cam: false, name: ce.name || '', code: base + ' · ' + (ce.name || 'camera error') };
+    }
+  }
+
+  async function startAR() {
+    if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      showError('Camera not supported', 'This browser cannot open the camera. Open the link in Chrome or Safari, or view 3D instead.', 'no getUserMedia');
+      return;
+    }
+    hint('Starting camera…');
+    $('start').classList.remove('on');
+    lastArError = '';
+    try {
+      try { await withTimeout(sys().start(), 30000); }
+      catch (e1) {
+        try { sys().stop(); } catch (_) {}
+        await new Promise(r => setTimeout(r, 700));
+        await withTimeout(sys().start(), 30000);   // one silent retry
+      }
+      started = true;
+      $('hud').style.display = 'block';
+      hint('Point at the dish photo on the menu');
+    } catch (e) {
+      console.error(e);
+      try { sys().stop(); } catch (_) {}
+      hint('');
+      const d = await diagnose(e);
+      if (d.cam) {
+        showError('AR could not start', 'The camera works, but this phone or browser could not run the AR engine. Open the link in Chrome (updated), or use the 3D view.', d.code);
+      } else {
+        let msg = 'The browser could not open the camera.';
+        if (/NotAllowed|Security/.test(d.name)) msg = 'The camera is blocked for this site. Tap the lock icon next to the address, choose Permissions, then Camera, then Allow, and reload. Also check Android Settings > Apps > your browser > Permissions > Camera.';
+        else if (/NotReadable/.test(d.name)) msg = 'Another app is using the camera. Close it and try again.';
+        else if (/NotFound|Overconstrained/.test(d.name)) msg = 'No usable camera was found on this phone.';
+        showError('Camera not available', msg, d.code);
+      }
+    }
+  }
+
+  // "Scan the menu photo": the button is never locked. If the camera engine is not ready yet, the customer can keep
+  // playing with the 3D dish; the camera opens by itself as soon as it is ready. Tapping again cancels the wait.
+  $('go').onclick = () => {
+    if (arReady) { startAR(); return; }
+    if (wantAR) { wantAR = false; resetGo(); hint(''); return; }
+    wantAR = true;
+    $('go').textContent = 'Camera opens when ready… (tap to cancel)';
+    if (heroFinished) startEngine();    // otherwise heroDone() starts it right after the dish has loaded
+  };
+
+  function stopAR() {
+    try { if (started) sys().stop(); } catch (e) {}
+    started = false;
+    if (window.__attachBack) window.__attachBack(false);
+    $('hud').style.display = 'none';
+    hint('');
+  }
+  function open3D() { stopAR(); show('start'); $('start').classList.add('only3d'); }
+
+  $('skip').onclick = open3D;
+  $('err3d').onclick = open3D;
+  $('errretry').onclick = () => show('start');
+  $('hud3d').onclick = open3D;
+  $('back').onclick = () => { show('start'); };
+
+  // ---------- Step 3: touch controls and detach (set up once the AR scene exists) ----------
+  function initAR() {
+    const T = AFRAME.THREE, D2R = Math.PI / 180;
+    const pop = $('pop'), tilt = $('tilt'), spin = $('spin'), zoom = $('zoom'), t0 = $('t0'), dbtn = $('detach');
+    let found = false, detached = false, gone = true, goneTimer = null, moveMode = false;
+    let rx = 0, rz = 0, zv = 1;
+
+    scene.addEventListener('arError', ev => { lastArError = (ev.detail && ev.detail.error) || 'arError'; });
+
+    // Pop-up + 360 spin (1.5s). Replays only if the photo was lost for more than 1.2s.
+    const playPop = () => pop.emit('popstart');
+    t0.addEventListener('targetFound', () => {
+      found = true; clearTimeout(goneTimer);
+      if (!detached) hint('Drag to rotate · pinch to zoom');
+      if (!detached && gone) { gone = false; playPop(); }
+    });
+    t0.addEventListener('targetLost', () => {
+      found = false;
+      if (!detached) hint('Point at the dish photo on the menu');
+      clearTimeout(goneTimer);
+      goneTimer = setTimeout(() => { gone = true; }, 1200);
+    });
+
+    // ----- Never show the underside -----
+    // The dish's "up" direction is the +Z axis of the tilt group. Looking from the camera, the base is hidden as long as the camera
+    // stays above the base plane, i.e. dot(up, direction-to-camera) >= MIN_ELEVATION_SIN * distance. This limits the tilt angle (rx)
+    // every frame, whether the dish sits on the menu photo or is detached, and whatever way the phone is held.
+    const vA = new T.Vector3(), vB = new T.Vector3(), qA = new T.Quaternion();
+    let tiltErrors = 0;
+    window.__limitTilt = function () {
+      if (!HIDE_BOTTOM_IN_AR || tiltErrors > 3) return;       // switched off by the setting, or it failed repeatedly
+      try {
+        if (!found && !detached) return;                      // nothing is visible, nothing to limit
+        if (!isFinite(rx)) { rx = 0; tilt.object3D.rotation.x = 0; }
+        const cam = scene.camera; if (!cam) return;
+        pop.object3D.getWorldPosition(vA);
+        cam.getWorldPosition(vB);
+        vB.sub(vA);                          // from the dish to the camera
+        pop.object3D.getWorldQuaternion(qA);
+        vB.applyQuaternion(qA.invert());     // the same direction in the dish's own frame
+        const L = vB.length(), R = Math.hypot(vB.y, vB.z);
+        if (!isFinite(L) || !isFinite(R) || L < 1e-6 || R < 1e-6) return;
+        const t = MIN_ELEVATION_SIN * L / R;
+        if (t >= 1) return;
+        const half = Math.acos(t) / D2R;     // allowed tilt: mid - half ... mid + half (degrees)
+        let mid = -Math.atan2(vB.y, vB.z) / D2R;
+        mid += 360 * Math.round((rx - mid) / 360);
+        const nrx = Math.max(mid - half, Math.min(mid + half, rx));
+        if (isFinite(nrx) && nrx !== rx) { rx = nrx; tilt.object3D.rotation.x = rx * D2R; }
+      } catch (err) {
+        tiltErrors++; console.warn('hide-bottom skipped:', err);   // never let this stop the camera view
+      }
+    };
+
+    // ----- Detach: move the model from the photo onto the camera, keeping its current size/position -----
+    function attachBack(playAnim) {
+      if (!detached) return;
+      t0.object3D.add(pop.object3D);
+      pop.object3D.position.set(0, 0, 0); pop.object3D.quaternion.identity(); pop.object3D.scale.set(1, 1, 1);
+      zv = 1; zoom.object3D.scale.setScalar(1);
+      detached = false; dbtn.textContent = 'Detach';
+      moveMode = false; $('mode').textContent = 'Drag: Rotate'; $('mode').style.display = 'none';
+      hint(found ? '' : 'Point at the dish photo on the menu');
+      if (found && playAnim !== false) playPop();
+    }
+    window.__attachBack = attachBack;
+    dbtn.onclick = () => {
+      if (!detached) {
+        if (!found) { hint('Point at the dish photo first'); return; }
+        document.querySelector('a-camera').object3D.attach(pop.object3D);
+        detached = true; dbtn.textContent = 'Attach back';
+        $('mode').style.display = 'inline-block';
+        hint('Drag to rotate · pinch to zoom · two fingers to move');
+      } else attachBack(true);
+    };
+
+    // ----- Gestures: one finger = rotate/tilt, two fingers = pinch zoom -----
+    $('mode').onclick = () => {
+      moveMode = !moveMode;
+      $('mode').textContent = moveMode ? 'Drag: Move' : 'Drag: Rotate';
+    };
+
+    // Slide the detached model across the screen (pixels -> camera-space units at the model's depth)
+    function pan(dx, dy) {
+      const o = pop.object3D.position;
+      const f = scene.camera && scene.camera.projectionMatrix.elements[5];
+      const h = (scene.canvas && scene.canvas.clientHeight) || window.innerHeight;
+      const k = f ? (2 * (Math.abs(o.z) || 1)) / (f * h) : 0.002;
+      o.x += dx * k; o.y -= dy * k;
+    }
+
+    // Zoom around a screen point (instead of the model centre), so you can zoom into any part of the dish
+    function zoomAbout(mx, my, r) {
+      const o = pop.object3D.position, m = scene.camera && scene.camera.projectionMatrix.elements;
+      if (!m || !m[0] || !m[5]) return;
+      const W = (scene.canvas && scene.canvas.clientWidth) || window.innerWidth;
+      const H = (scene.canvas && scene.canvas.clientHeight) || window.innerHeight;
+      const z = Math.abs(o.z) || 1;
+      const cx = ((mx - W / 2) / (W / 2)) * z / m[0];
+      const cy = (-(my - H / 2) / (H / 2)) * z / m[5];
+      o.x = cx + (o.x - cx) * r; o.y = cy + (o.y - cy) * r;
+    }
+
+    const pts = new Map(); let lastD = 0;
+    const dist = () => { const [a, b] = [...pts.values()]; return Math.hypot(a.x - b.x, a.y - b.y); };
+    addEventListener('pointerdown', e => {
+      if (!started || e.target.closest('button')) return;
+      pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pts.size === 2) lastD = dist();
+    });
+    addEventListener('pointermove', e => {
+      const p = pts.get(e.pointerId); if (!p) return;
+      const dx = e.clientX - p.x, dy = e.clientY - p.y;
+      p.x = e.clientX; p.y = e.clientY;
+      if (pts.size === 1) {
+        if (detached && moveMode) pan(dx, dy);
+        else {
+          rz += dx * 0.6; rx += dy * 0.4;              // the underside limit is applied every frame by __limitTilt
+          spin.object3D.rotation.z = rz * D2R; tilt.object3D.rotation.x = rx * D2R;
+          window.__limitTilt();
+        }
+      } else if (pts.size === 2) {
+        const d = dist();
+        const ratio = (lastD && d) ? d / lastD : 1;
+        const nz = Math.min(1e7, Math.max(1e-3, zv * ratio));   // no practical limit
+        const r = nz / zv; zv = nz; lastD = d;
+        zoom.object3D.scale.setScalar(zv);
+        if (detached) {
+          const [a, b] = [...pts.values()];
+          zoomAbout((a.x + b.x) / 2, (a.y + b.y) / 2, r);   // keep the spot between your fingers in place
+          pan(dx / 2, dy / 2);                              // the midpoint of two fingers moves half as far as each finger
+        }
+      }
+    });
+    ['pointerup', 'pointercancel'].forEach(t => addEventListener(t, e => pts.delete(e.pointerId)));
+  }
+})();
+</script>
+</body>
+</html>
