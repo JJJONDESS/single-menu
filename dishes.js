@@ -16,7 +16,7 @@ const DISHES = {
     price: '', description: '', ingredients: '', allergens: '',
     glb:    'dishes/mcart_small-v1.glb',
     glbIos: 'dishes/mcart_ios-v1.glb',
-    mind:   'dishes/pizza.mind',
+    mind:   'dishes/mcart-targets.mind',
     poster: 'dishes/mcart-poster.jpg'
   },
 
@@ -25,7 +25,7 @@ const DISHES = {
     price: '', description: '', ingredients: '', allergens: '',
     glb:    'dishes/mr_pizza_small-v1.glb',
     glbIos: 'dishes/mr_pizza_ios-v1.glb',
-    mind:   'dishes/pizza.mind',
+    mind:   'dishes/mr-pizza-target.mind',
     poster: 'dishes/mr-pizza-poster.jpg'
   },
   // ---- NEXT DISH: add a comma after the last "}" above, then copy one block and paste it here ----
