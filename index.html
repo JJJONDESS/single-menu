@@ -149,10 +149,17 @@
     return;
   }
 
-  // ---------- Which dish? (?item=... from the QR link) ----------
-  const key = new URLSearchParams(location.search).get('item');
+  // ---------- Which dish? (?item=...&table=... from the QR link) ----------
+  const urlParams = new URLSearchParams(location.search);
+  const key = urlParams.get('item');
+  
+  // >>> NEW ADDITION: Captures your table number (?table=7) dynamically!
+  // If a walk-in customer just scans a basic link without a table parameter, it defaults to "Walk-in"
+  const currentTableNumber = urlParams.get('table') || "Walk-in";
+
   const DISH = DISHES[key];
   if (!DISH) { showMenuPage(key); return; }
+  
 
   // Load the 3D viewer only on a dish page (the menu page does not need it)
   { const vs = document.createElement('script'); vs.type = 'module';
