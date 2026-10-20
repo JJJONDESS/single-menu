@@ -1,91 +1,76 @@
-// ============================================================
-//  THIS IS THE ONLY FILE YOU EDIT WHEN YOU ADD A NEW DISH
-//  Paths must match your GitHub file names EXACTLY (capital letters count!)
-// ============================================================
-
-
-  // ---------- Which dish? (?item=... from the QR link) ----------
-  const urlParams = new URLSearchParams(location.search);
-  const key = urlParams.get('item');
-  
-  // 1. ADD THIS LINE: Capture the table number dynamically from the link (?table=7)
-  // If no table is passed, it safely defaults to "Walk-in"
-  const currentTableNumber = urlParams.get('table') || "Walk-in";
-
-  const DISH = DISHES[key];
-  if (!DISH) { showMenuPage(key); return; }
-
 const RESTAURANT = {
-  name: 'My Restaurant',       // shown in the browser tab title
-  phone: '03160843627',        // "Call waiter" button
-  whatsapp: '923160843627'     // WhatsApp needs country code, no "+" and no leading 0 (Pakistan = 92)
+  name: 'Melt9 Gulgasht Multan',       // shown in the browser tab title
+  phone: '03160843627',                // "Call waiter" button
+  whatsapp: '923160843627'             // WhatsApp contact number
 };
 
 const DISHES = {
   
-    'mcart': {                                                      // <- this name goes in the QR link: ?item=mcart
+  'mcart': {                                                      
     name: 'McArt Pizza',
-    price: '', description: '', ingredients: '', allergens: '',    // e.g. 'Rs 1450', 'Fresh vegetables on a hand-stretched base, Mushroom, capsicum, olives, onion, mozzarella,
-    glb:    'dishes/mcart_small-v1.glb',                          // 3D model (file inside the "dishes" folder)
-    glbIos: 'dishes/mcart_ios-v1.glb',                           // iPhone only (file inside the "dishes" folder)
-    mind:   'dishes/mcart-targets.mind',                        // compiled marker image (file inside the "dishes" folder)
-    poster: 'dishes/mcart-poster.jpg'                          // LOAD THE Image quickly when customer visit the page 
+    price: '1800', description: 'Freshly baked McArt signature pizza', ingredients: 'Cheese, Crust, Pizza Sauce, Savory Pepperoni', allergens: 'Gluten, Dairy',    
+    glb:    'dishes/mcart_small-v1.glb',                          
+    glbIos: 'dishes/mcart_ios-v1.glb',                           
+    mind:   'dishes/mcart-targets.mind',                        
+    poster: 'dishes/mcart-poster.jpg'                          
   },
 
-  'Mr-Pizza': {                                                       // <- this name goes in the QR link: ?item=mcart
+  'Mr-Pizza': {                                                       
     name: 'MR-Pizza-Mayu',
-    price: '', description: '', ingredients: '', allergens: '',   // e.g. 'Rs 1450', 'Fresh vegetables on a hand-stretched base, Mushroom, capsicum, olives, onion, mozzarella,
-    glb:    'dishes/mr_pizza_small-v1.glb',                      // 3D model (file inside the "dishes" folder)
-    glbIos: 'dishes/mr_pizza_ios-v1.glb',                       // iPhone only (file inside the "dishes" folder)
-    mind:   'dishes/mr-pizza-target.mind',                     // compiled marker image (file inside the "dishes" folder)
-    poster: 'dishes/mr-pizza-poster.jpg'                      // LOAD THE Image quickly when customer visit the page
+    price: '1650', description: 'Creamy mayo garlic style signature crust', ingredients: 'Mayo Sauce, Grilled Chicken, Onions, Mozzarella', allergens: 'Gluten, Dairy',   
+    glb:    'dishes/mr_pizza_small-v1.glb',                      
+    glbIos: 'dishes/mr_pizza_ios-v1.glb',                       
+    mind:   'dishes/mr-pizza-target.mind',                     
+    poster: 'dishes/mr-pizza-poster.jpg'                      
   },
 
-  'VegPizza': {                                                       // <- this name goes in the QR link: ?item=mcart
+  'VegPizza': {                                                       
     name: 'MR-VegPizza',
-    price: '1599', description: '', ingredients: '', allergens: '',   // e.g. 'Rs 1450', 'Fresh vegetables on a hand-stretched base, Mushroom, capsicum, olives, onion, mozzarella,
-    glb:    'dishes/VegPizza_small-v1.glb',                      // 3D model (file inside the "dishes" folder)
-    glbIos: 'dishes/VegPizza_ios-v1.glb',                       // iPhone only (file inside the "dishes" folder)
-    mind:   'dishes/VegPizza.mind',                     // compiled marker image (file inside the "dishes" folder)
-    poster: 'dishes/VegPizzaimage.jpg'                      // LOAD THE Image quickly when customer visit the page
-  },
-  // ---- NEXT DISH: add a comma after the last "}" above, then copy one block and paste it here ----
+    price: '1599', description: 'Fresh vegetables on a hand-stretched base', ingredients: 'Mushroom, capsicum, olives, onion, mozzarella', allergens: 'Gluten, Dairy',   
+    glb:    'dishes/VegPizza_small-v1.glb',                      
+    glbIos: 'dishes/VegPizza_ios-v1.glb',                       
+    mind:   'dishes/VegPizza.mind',                     
+    poster: 'dishes/VegPizzaimage.jpg'                      
+  }
 
 };
-// 3. ADD THIS FUNCTION: The script that pushes your order parameters directly to your local Odoo machine
-function placeOdooOrder() {
-    // Replace this link with your active live Ngrok forwarding URL or your public router port address
-    const ODOO_API_ENDPOINT = "https://your-ngrok-link-or-public-ip:8069/api/pos/ui/create_order";
 
-    const payload = {
-        params: {
-            table_id: currentTableNumber === "Walk-in" ? false : parseInt(currentTableNumber), 
-            floor_id: 1, // Main Floor ID inside Odoo
-            lines: [
-                {
-                    product_id: DISH.name, // Will dynamically pass "McArt Pizza"
-                    qty: 1,
-                    price_unit: parseFloat(DISH.price)
-                }
-            ],
-            state: "draft" // Drops it live into the active cooking/billing queue
+// >>> NEW PIPELINE FUNCTION: Sends your active WebXR menu choice straight to Odoo
+function placeOdooOrder() {
+    // Paste your active live Ngrok forwarding URL address here from your black tunnel window
+    const ODOO_API_ENDPOINT = "https://ngrok-free.app";
+
+    const odooOrderPacket = {
+        "params": {
+            "data": {
+                // If "Walk-in" is detected, sets table to false; otherwise maps to an integer (e.g. 7 or 8)
+                "table_id": currentTableNumber === "Walk-in" ? false : parseInt(currentTableNumber), 
+                "floor_id": 2, // Matches the Floor ID "2" we verified inside your URL settings
+                "lines": [
+                    [0, 0, {
+                        "product_id": DISH.name, // Automatically sends "McArt Pizza", "MR-Pizza-Mayu", or "MR-VegPizza"
+                        "qty": 1,
+                        "price_unit": parseFloat(DISH.price) || 1800.00
+                    }]
+                ],
+                "state": "draft" // Pushes it live directly into the active dashboard checkout session
+            }
         }
     };
 
     fetch(ODOO_API_ENDPOINT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(odooOrderPacket)
     })
-    .then(response => {
-        if (response.ok) {
-            alert(`Order received! Your ${DISH.name} is being prepared for Table #${currentTableNumber}.`);
-        } else {
-            alert("Network connection slow. Please notify your server.");
-        }
+    .then(response => response.json())
+    .then(data => {
+        console.log("Success confirmation from Odoo:", data);
+        alert(`Success! Order for 1x ${DISH.name} has been sent straight to the kitchen from Table #${currentTableNumber}.`);
     })
     .catch(error => {
-        console.error("Backend Error:", error);
-        alert("Order timeout. Saved locally.");
+        console.error("Network communication failure:", error);
+        alert("Order delivery timeout. Please check your network or call your server.");
     });
 }
+
