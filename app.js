@@ -131,8 +131,8 @@ export async function submitOrder() {
     }
   };
 
-  // Dispatch the text data straight into your local server port infrastructure
-  const response = await fetch("http://localhost:8069/jsonrpc", {
+  // Change it from localhost to your live ngrok tunnel:
+const response = await fetch("https://YOUR_NGROK_URL_HERE.ngrok-free.app/jsonrpc", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(odooPayload)
