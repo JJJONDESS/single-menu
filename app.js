@@ -77,7 +77,6 @@ function loadCart() {
 let cart = loadCart();
 function save() { try { localStorage.setItem(CART_KEY, JSON.stringify(cart)); } catch (e) {} changeListeners.forEach(f => f()); }
 
-// EXPORTS FOR INDEX.HTML (Ensures buttons work and cards display data dynamically)
 export function addItem(id) {
   const d = dishOf(id), p = priceOf(d);
   if (!d || !p) return false;
@@ -98,7 +97,6 @@ export const cartCount = () => cart.reduce((s, i) => s + i.qty, 0);
 export const cartTotal = () => cart.reduce((s, i) => s + i.qty * i.price, 0);
 export const getCart = () => cart.map(i => ({ ...i }));
 
-// Bind change listeners to trigger manual UI updates on index items card nodes
 export const onCartChange = (callback) => { changeListeners.add(callback); };
 
 window.addEventListener('storage', e => { if (e.key === CART_KEY) { cart = loadCart(); changeListeners.forEach(f => f()); } });
@@ -125,16 +123,16 @@ export async function submitOrder() {
     timestamp: F.serverTimestamp()
   }), 30000, 'We could not confirm your order. Please check your internet connection.');
   
-  // Set localStorage tracking token parameter
   try { localStorage.setItem('arm_order_id', ref.id); } catch (e) {}
   clearCart();
   return ref.id;
 }
 
+let stopTracking = null; // Defined globally once at the root scope levels
 export async function trackOrder(id, onStatus, onError) {
   const { db, F } = await getDb();
   if (stopTracking) stopTracking();
-  let stopTracking = F.onSnapshot(F.doc(db, 'orders', id),
+  stopTracking = F.onSnapshot(F.doc(db, 'orders', id),
     snap => {
       if (snap.exists()) {
         const currentStatus = snap.data().status;
@@ -166,7 +164,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   if (savedOrderId && overlayNode && msgNode) {
     overlayNode.style.display = 'flex';
-    // Dynamically request engine configurations
     const { db, F } = await getDb();
     F.onSnapshot(F.doc(db, 'orders', savedOrderId), (snap) => {
       if (snap.exists()) {
