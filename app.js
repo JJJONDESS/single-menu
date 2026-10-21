@@ -132,7 +132,7 @@ export async function submitOrder() {
   };
 
   // Change your fetch URL to use your unique ngrok address:
-const response = await fetch("https://ngrok-free.dev", {
+const response = await fetch("https://overprice-carless-commute.ngrok-free.dev/jsonrpc", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify(odooPayload)
