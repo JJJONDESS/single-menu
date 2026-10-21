@@ -6,6 +6,7 @@
 <title>Menu AR</title>
 <script src="dishes.js"></script>
 <!-- The menu page loads nothing heavy. On a dish page the 3D viewer loads first (see the script below), so the dish appears quickly. The camera/AR engine (A-Frame + MindAR) loads afterwards in the background. -->
+<script type="module" src="app.js"></script>
 <link rel="preconnect" href="https://aframe.io">
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <style>
@@ -76,6 +77,59 @@
   #start .ui #info { color: #555; text-decoration: underline; }
   /* Poster picture: a normal image shown instantly, while the 3D viewer is still loading */
   #posterimg { position: absolute; z-index: 1; object-fit: contain; pointer-events: none; background: #fff; transition: opacity .35s; }
+
+  /* ===== Ordering: cart button, cart drawer, order status (only visible when app.js has Firebase set up) ===== */
+  #cartui { display: none; }
+  body.ordering-on #cartui { display: block; }
+  body.hide-fab #cartfab, body.hide-fab #orderpill { display: none !important; }
+  #cartui button { font: inherit; margin: 0; }
+  #cartui, #cartui * { user-select: none; -webkit-user-select: none; }
+  #cartfab { position: fixed; top: calc(10px + env(safe-area-inset-top, 0px)); right: 12px; z-index: 40; width: 46px; height: 46px; padding: 0;
+             border-radius: 50%; background: #fff; border: 1px solid #ddd; box-shadow: 0 2px 10px rgba(0,0,0,.15); font-size: 1.3rem; line-height: 1; color: #222; }
+  #cartbadge { display: none; position: absolute; top: -6px; right: -6px; min-width: 20px; height: 20px; padding: 0 5px; box-sizing: border-box;
+               border-radius: 10px; background: #e8452c; color: #fff; font-size: .75rem; font-weight: 700; line-height: 20px; }
+  #cartback { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.4); opacity: 0; pointer-events: none; transition: opacity .25s; }
+  #cartback.open { opacity: 1; pointer-events: auto; }
+  #cartdrawer { position: fixed; left: 0; right: 0; bottom: 0; z-index: 51; max-width: 560px; margin: 0 auto; max-height: 86%; display: flex; flex-direction: column;
+                background: #fff; color: #222; border-radius: 20px 20px 0 0; box-shadow: 0 -6px 30px rgba(0,0,0,.2);
+                transform: translateY(105%); transition: transform .3s; padding-bottom: env(safe-area-inset-bottom, 0px); visibility: hidden; }
+  #cartdrawer.open { transform: none; visibility: visible; }
+  #cartdrawer header { display: flex; align-items: center; gap: 10px; padding: 16px 18px 10px; }
+  #cartdrawer h2 { margin: 0; font-size: 1.2rem; flex: 1; }
+  #carttable { color: #666; font-size: .9rem; }
+  #cartclose { width: 36px; height: 36px; padding: 0; border-radius: 50%; background: #f1f1f1; color: #333; }
+  #cartlist { overflow-y: auto; touch-action: pan-y; -webkit-overflow-scrolling: touch; padding: 0 18px; min-height: 60px; }
+  #cartempty { padding: 28px 18px; text-align: center; color: #777; }
+  .crow { display: flex; align-items: center; gap: 10px; padding: 12px 0; border-bottom: 1px solid #eee; }
+  .cinfo { flex: 1; min-width: 0; }
+  .cname { font-weight: 600; }
+  .cprice { color: #666; font-size: .85rem; margin-top: 2px; }
+  .cqty { display: flex; align-items: center; gap: 8px; }
+  .cn { min-width: 1.6em; text-align: center; font-weight: 700; }
+  .cbtn { width: 34px; height: 34px; padding: 0; border-radius: 50%; background: #f1f1f1; color: #222; font-size: 1.1rem; font-weight: 700; }
+  .cbtn.cdel { background: none; color: #b33; font-size: .95rem; }
+  #cartdrawer footer { padding: 12px 18px 16px; border-top: 1px solid #eee; }
+  #cartdrawer .line { display: flex; justify-content: space-between; font-size: 1.15rem; margin-bottom: 8px; }
+  #carterr { color: #c0392b; font-size: .85rem; min-height: 1.1em; margin-bottom: 6px; }
+  #cartconfirm { width: 100%; padding: 15px; border-radius: 999px; background: #e8452c; color: #fff; font-weight: 700; }
+  #cartclear { width: 100%; margin-top: 8px; padding: 10px; border-radius: 999px; background: none; color: #777; font-size: .9rem; }
+  #cartconfirm:disabled, #cartclear:disabled { opacity: .45; }
+  #orderstatus { position: fixed; inset: 0; z-index: 60; display: none; align-items: center; justify-content: center; padding: 24px; background: rgba(0,0,0,.45); }
+  #orderstatus.open { display: flex; }
+  #orderstatus .card { background: #fff; color: #222; width: 100%; max-width: 340px; border-radius: 22px; padding: 28px 24px 22px; text-align: center; }
+  #osicon { font-size: 2.6rem; }
+  #ostitle { margin: 8px 0 6px; font-size: 1.3rem; }
+  #osmsg { margin: 0 auto 10px; color: #444; line-height: 1.5; max-width: 28ch; }
+  #osmeta { margin: 0 0 16px; color: #888; font-size: .85rem; max-width: none; }
+  #osclose { padding: 12px 36px; border-radius: 999px; background: #e8452c; color: #fff; font-weight: 700; }
+  #orderpill { display: none; position: fixed; top: calc(64px + env(safe-area-inset-top, 0px)); right: 12px; z-index: 40; padding: 7px 14px; border-radius: 999px;
+               background: #1a1a1a; color: #fff; font-size: .85rem; }
+  /* Add buttons */
+  #start .ui #addcart { display: none; background: #1fa855; color: #fff; }
+  body.ordering-on #start .ui #addcart { display: block; }
+  [data-add][hidden] { display: none !important; }
+  .hub .card .add { display: none; width: calc(100% - 24px); margin: 0 12px 12px; padding: 10px; border: 0; border-radius: 999px; background: #1fa855; color: #fff; font: inherit; font-weight: 600; }
+  body.ordering-on .hub .card .add { display: block; }
   /* "Menu" link on a dish page */
   #menulink { display: none; position: absolute; left: 12px; top: calc(12px + env(safe-area-inset-top, 0px)); z-index: 4;
               font-size: .9rem; color: #444; background: rgba(255,255,255,.92); border: 1px solid #ddd; border-radius: 999px;
@@ -110,11 +164,9 @@
     <button id="go">Scan the menu photo</button>
     <button id="ar" class="alt" style="display:none">View in your space (AR)</button>
     <button class="plain" id="skip">View 3D without camera</button>
+    <button id="addcart">Add to cart</button>
     <button class="wa" id="wa">Order on WhatsApp</button>
     <button class="plain" id="info" style="display:none">Details</button>
-    <button id="odooOrderBtn" onclick="placeOdooOrder()" style="background-color: #E04F33; color: white; border: none; padding: 12px 30px; border-radius: 20px; font-weight: bold; width: 80%; margin-top: 10px;">
-  Confirm & Order to Kitchen
-</button>
   </div>
 
   <div id="sheet"><div class="card">
@@ -138,6 +190,28 @@
   <button class="plain" id="err3d">View 3D</button>
 </div>
 
+
+<!-- Cart, order status (hidden until ordering is switched on in app.js) -->
+<div id="cartui" data-keep>
+  <button id="cartfab" type="button" aria-label="Open your cart">&#128722;<span id="cartbadge">0</span></button>
+  <div id="orderpill" role="button" tabindex="0"></div>
+  <div id="cartback"></div>
+  <section id="cartdrawer" role="dialog" aria-label="Your order">
+    <header><h2>Your order</h2><span id="carttable"></span><button id="cartclose" type="button" aria-label="Close">&#10005;</button></header>
+    <div id="cartlist"></div>
+    <div id="cartempty">Your cart is empty. Tap "Add" on a dish.</div>
+    <footer>
+      <div class="line"><span>Total</span><strong id="carttotal">Rs 0</strong></div>
+      <div id="carterr" role="alert"></div>
+      <button id="cartconfirm" type="button">Confirm Order</button>
+      <button id="cartclear" type="button">Delete all</button>
+    </footer>
+  </section>
+  <div id="orderstatus"><div class="card" role="status" aria-live="polite">
+    <div id="osicon"></div><h3 id="ostitle"></h3><p id="osmsg"></p><p id="osmeta"></p><button id="osclose" type="button">OK</button>
+  </div></div>
+</div>
+
 <div id="hud"><button id="detach">Detach</button><button id="mode" style="display:none">Drag: Rotate</button><button id="hud3d">3D view</button></div>
 <div id="hint"></div>
 
@@ -152,17 +226,10 @@
     return;
   }
 
-  // ---------- Which dish? (?item=...&table=... from the QR link) ----------
-  const urlParams = new URLSearchParams(location.search);
-  const key = urlParams.get('item');
-  
-  // >>> NEW ADDITION: Captures your table number (?table=7) dynamically!
-  // If a walk-in customer just scans a basic link without a table parameter, it defaults to "Walk-in"
-  const currentTableNumber = urlParams.get('table') || "Walk-in";
-
+  // ---------- Which dish? (?item=... from the QR link) ----------
+  const key = new URLSearchParams(location.search).get('item');
   const DISH = DISHES[key];
   if (!DISH) { showMenuPage(key); return; }
-  
 
   // Load the 3D viewer only on a dish page (the menu page does not need it)
   { const vs = document.createElement('script'); vs.type = 'module';
@@ -173,15 +240,16 @@
     const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
     document.documentElement.style.cssText = 'height:auto;overflow:auto;touch-action:auto;background:#fff';
     document.body.style.cssText = 'height:auto;overflow:auto;touch-action:auto;user-select:auto;-webkit-user-select:auto;background:#fff;color:#222';
-    document.body.innerHTML = '';
+    [...document.body.children].forEach(c => { if (!c.hasAttribute('data-keep') && c.tagName !== 'SCRIPT') c.remove(); });
     const css = document.createElement('style');
-    css.textContent = '.hub{max-width:680px;margin:0 auto;padding:calc(28px + env(safe-area-inset-top,0px)) 16px 48px}' +
+    css.textContent = '.hub{max-width:680px;margin:0 auto;padding:calc(56px + env(safe-area-inset-top,0px)) 16px 48px}' +
       '.hub h1{font-size:1.7rem;margin:0 0 6px;text-align:center;color:#1a1a1a}' +
       '.hub .lead{color:#666;text-align:center;margin:0 auto 22px;max-width:34ch;line-height:1.5}' +
       '.hub .warn{background:#fff4e5;color:#8a5a00;border-radius:12px;padding:10px 14px;margin:0 0 16px;text-align:center}' +
       '.hub .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}' +
       '@media(min-width:560px){.hub .grid{grid-template-columns:repeat(3,1fr)}}' +
-      '.hub a.card{display:block;text-decoration:none;color:inherit;border:1px solid #e6e6e6;border-radius:16px;overflow:hidden;background:#fff;box-shadow:0 1px 6px rgba(0,0,0,.06)}' +
+      '.hub .card{display:flex;flex-direction:column;border:1px solid #e6e6e6;border-radius:16px;overflow:hidden;background:#fff;box-shadow:0 1px 6px rgba(0,0,0,.06)}' +
+      '.hub .clink{display:block;flex:1;text-decoration:none;color:inherit}' +
       '.hub .pic{aspect-ratio:1/1;background:#fafafa;display:flex;align-items:center;justify-content:center}' +
       '.hub .pic img{width:100%;height:100%;object-fit:contain}' +
       '.hub .pic span{font-size:2.4rem}' +
@@ -199,7 +267,8 @@
     const grid = mk('div', 'grid');
     Object.keys(DISHES).forEach(k => {
       const d = DISHES[k];
-      const a = mk('a', 'card'); a.href = '?item=' + encodeURIComponent(k);
+      const card = mk('div', 'card');
+      const a = mk('a', 'clink'); a.href = '?item=' + encodeURIComponent(k);
       const pic = mk('div', 'pic');
       if (d.poster) { const im = new Image(); im.alt = d.name; im.loading = 'lazy'; im.decoding = 'async'; im.src = d.poster; pic.appendChild(im); }
       else pic.appendChild(mk('span', '', '🍽'));
@@ -207,7 +276,9 @@
       info.appendChild(mk('p', 'nm', d.name));
       if (d.price) info.appendChild(mk('p', 'pr', d.price));
       info.appendChild(mk('span', 'tag', 'View in 3D ›'));
-      a.appendChild(pic); a.appendChild(info); grid.appendChild(a);
+      a.appendChild(pic); a.appendChild(info); card.appendChild(a);
+      const add = mk('button', 'add', '+ Add'); add.type = 'button'; add.setAttribute('data-add', k); card.appendChild(add);
+      grid.appendChild(card);
     });
     wrap.appendChild(grid);
     document.body.appendChild(wrap);
@@ -235,6 +306,7 @@
   $('sclose').onclick = () => $('sheet').classList.remove('on');
   if (!RESTAURANT.whatsapp) $('wa').style.display = 'none';   // clear the number in dishes.js to hide the button
 
+  $('addcart').setAttribute('data-add', key);   // the cart code in app.js shows this button when ordering is on
   if (Object.keys(DISHES).length > 1) { $('menulink').style.display = 'block'; $('menulink').href = location.pathname; }   // back to the menu page
 
   if (isIOS) {   // iPhone: AR button goes first and becomes the main button
@@ -243,7 +315,7 @@
     $('go').classList.add('alt');
   }
 
-  const show = id => { ['start', 'error'].forEach(s => $(s).classList.toggle('on', s === id)); $('start').classList.remove('only3d'); };
+  const show = id => { ['start', 'error'].forEach(s => $(s).classList.toggle('on', s === id)); $('start').classList.remove('only3d'); document.body.classList.remove('hide-fab'); };
   const hint = t => { $('hint').textContent = t; };
   function showError(title, msg, code) {
     $('errtitle').textContent = title; $('errmsg').textContent = msg; $('errcode').textContent = code || '';
@@ -408,6 +480,7 @@
     }
     hint('Starting camera…');
     $('start').classList.remove('on');
+    document.body.classList.add('hide-fab');   // the cart button would sit on top of the camera view
     lastArError = '';
     try {
       try { await withTimeout(sys().start(), 30000); }
@@ -453,7 +526,7 @@
     $('hud').style.display = 'none';
     hint('');
   }
-  function open3D() { stopAR(); show('start'); $('start').classList.add('only3d'); }
+  function open3D() { stopAR(); show('start'); $('start').classList.add('only3d'); document.body.classList.add('hide-fab'); }
 
   $('skip').onclick = open3D;
   $('err3d').onclick = open3D;
