@@ -131,12 +131,12 @@ export async function submitOrder() {
     }
   };
 
-  // Change it from localhost to your live ngrok tunnel:
-const response = await fetch("https://YOUR_NGROK_URL_HERE.ngrok-free.app/jsonrpc", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(odooPayload)
-  });
+  // Change your fetch URL to use your unique ngrok address:
+const response = await fetch("https://ngrok-free.dev", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(odooPayload)
+});
 
   if (!response.ok) {
     throw new Error("POS Gateway routing timed out. Please check if your local server is running.");
