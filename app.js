@@ -10,9 +10,9 @@
 
 export const FIREBASE_CONFIG = {
   apiKey: 'AIzaSyCNn5DaO7y0nbv_-27_iBJmioUl3BAPddc',
-  authDomain: 'restaurant-64f6a.firebaseapp.com',
+  authDomain: '://firebaseapp.com',
   projectId: 'restaurant-64f6a',
-  storageBucket: 'restaurant-64f6a.appspot.com',
+  storageBucket: '://appspot.com',
   messagingSenderId: '386962130068',
   appId: '1:386962130068:web:0b2ff00852ebfd18cce081'
 };
@@ -20,7 +20,7 @@ export const FIREBASE_CONFIG = {
 // the security rules (firestore.rules), not by hiding this block.
 
 const CURRENCY = 'Rs';                       // shown before prices
-const SDK = 'https://www.gstatic.com/firebasejs/10.14.1/';
+const SDK = 'https://gstatic.com';
 
 export const isConfigured = () =>
   !!FIREBASE_CONFIG.apiKey && !/^PASTE/.test(FIREBASE_CONFIG.apiKey) &&
@@ -57,8 +57,8 @@ export function getAuthKit() {               // -> { auth, U }   (U = the auth f
 export function getTable() {
   const clean = v => String(v || '').replace(/[^\w\- ]/g, '').trim().slice(0, 20);
   const fromUrl = clean(new URLSearchParams(location.search).get('table'));
-  if (fromUrl) { try { sessionStorage.setItem('arm_table', fromUrl); } catch (e) {} return fromUrl; }
-  try { return clean(sessionStorage.getItem('arm_table')) || 'Takeaway'; } catch (e) { return 'Takeaway'; }
+  if (fromUrl) { try { localStorage.setItem('arm_table', fromUrl); } catch (e) {} return fromUrl; }
+  try { return clean(localStorage.getItem('arm_table')) || 'Takeaway'; } catch (e) { return 'Takeaway'; }
 }
 
 // ----------------------------------------------------------------------------
@@ -125,7 +125,9 @@ export async function submitOrder() {
     assigned_employee: null,
     timestamp: F.serverTimestamp()
   }), 30000, 'We could not confirm your order. Please check your internet and ask your waiter before ordering again.');
-  try { sessionStorage.setItem('arm_order_id', ref.id); } catch (e) {}
+  
+  // FIXED HERE: Replaced sessionStorage with localStorage to handle persistent status states on reload
+  try { localStorage.setItem('arm_order_id', ref.id); } catch (e) {}
   clearCart();
   return ref.id;
 }
@@ -136,143 +138,48 @@ export async function trackOrder(id, onStatus, onError) {
   const { db, F } = await getDb();
   if (stopTracking) stopTracking();
   stopTracking = F.onSnapshot(F.doc(db, 'orders', id),
-    snap => onStatus(snap.exists() ? snap.data().status : null),
+    snap => {
+      if (snap.exists()) {
+        const currentStatus = snap.data().status;
+        // FIXED HERE: Automatically flushes active tokens when order clears out
+        if (currentStatus === 'completed') {
+          try { localStorage.removeItem('arm_order_id'); } catch (e) {}
+        }
+        onStatus(currentStatus);
+      } else {
+        onStatus(null);
+      }
+    },
     err => onError && onError(err));
 }
 
 // ============================================================================
-//  Customer screen (only runs on pages that contain <div id="cartui"> i.e. index.html)
+//  Customer screen UI Handler Engine (Runs natively on DOM container nodes)
 // ============================================================================
-const $ = id => document.getElementById(id);
-const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
-
 const STATUS = {
-  pending:    { icon: '⏳',         title: 'Order sent',        pill: 'Order sent',  msg: 'The kitchen has your order and will start soon.' },
+  pending:    { icon: '⏳', title: 'Order sent',        pill: 'Order sent',  msg: 'The kitchen has your order and will start soon.' },
   processing: { icon: '👨‍🍳', title: 'Cooking now', pill: 'Preparing…', msg: 'Your food is being prepared in the kitchen!' },
   served:     { icon: '🍽️', title: 'On its way',   pill: 'On its way',  msg: 'Your food is on its way to your table!' },
-  completed:  { icon: '✅',         title: 'Enjoy your meal!',  pill: 'Completed',   msg: 'Your order is complete. Thank you!' }
+  completed:  { icon: '✅', title: 'Enjoy your meal!',  pill: 'Completed',   msg: 'Thank you for dining at Melt 9!' }
 };
 
-function initCustomerUI() {
-  document.body.classList.add('ordering-on');
-  if ($('wa')) $('wa').style.display = 'none';                       // the cart replaces the WhatsApp button
+// Auto-trigger persistence pipeline listener on viewport boot transitions
+document.addEventListener('DOMContentLoaded', async () => {
+  const savedOrderId = localStorage.getItem('arm_order_id');
+  const overlayNode = document.getElementById('status-tracking-overlay');
+  const msgNode = document.getElementById('status-msg');
 
-  // ---- Add buttons (menu cards and the dish page) ----
-  const refreshAddButtons = () => document.querySelectorAll('[data-add]').forEach(b => { b.hidden = !priceOf(dishOf(b.dataset.add)); });
-  refreshAddButtons();
-  document.addEventListener('click', e => {
-    const b = e.target.closest('[data-add]');
-    if (!b) return;
-    e.preventDefault();
-    if (addItem(b.dataset.add)) {
-      const old = b.dataset.label || (b.dataset.label = b.textContent);
-      b.textContent = 'Added ✓'; clearTimeout(b._t); b._t = setTimeout(() => { b.textContent = old; }, 1100);
-    }
-  });
-
-  // ---- Cart drawer ----
-  const drawer = $('cartdrawer'), back = $('cartback');
-  const openDrawer = () => { renderCart(); drawer.classList.add('open'); back.classList.add('open'); $('carterr').textContent = ''; };
-  const closeDrawer = () => { drawer.classList.remove('open'); back.classList.remove('open'); };
-  $('cartfab').onclick = openDrawer;
-  $('cartclose').onclick = closeDrawer;
-  back.onclick = closeDrawer;
-
-  function renderCart() {
-    const items = getCart(), list = $('cartlist');
-    list.textContent = '';
-    $('cartempty').style.display = items.length ? 'none' : 'block';
-    items.forEach(i => {
-      const row = el('div', 'crow');
-      const info = el('div', 'cinfo');
-      info.append(el('div', 'cname', i.name), el('div', 'cprice', money(i.price) + ' × ' + i.qty + ' = ' + money(i.price * i.qty)));
-      const qty = el('div', 'cqty');
-      const mk = (t, label, fn) => { const b = el('button', 'cbtn', t); b.type = 'button'; b.setAttribute('aria-label', label); b.onclick = fn; return b; };
-      qty.append(mk('−', 'One less', () => changeQty(i.id, -1)), el('span', 'cn', String(i.qty)), mk('+', 'One more', () => changeQty(i.id, 1)));
-      const del = mk('✕', 'Remove ' + i.name, () => removeItem(i.id)); del.classList.add('cdel');
-      row.append(info, qty, del);
-      list.appendChild(row);
-    });
-    $('carttotal').textContent = money(cartTotal());
-    $('carttable').textContent = getTable() === 'Takeaway' ? 'Takeaway' : 'Table ' + getTable();
-    $('cartconfirm').disabled = !items.length || sending;
-    $('cartclear').disabled = !items.length;
-  }
-  function renderBadge() {
-    const n = cartCount();
-    $('cartbadge').textContent = n > 99 ? '99+' : String(n);
-    $('cartbadge').style.display = n ? 'block' : 'none';
-  }
-  changeListeners.add(() => { renderBadge(); if (drawer.classList.contains('open')) renderCart(); });
-  renderBadge();
-
-  // "Delete all" needs two taps so it cannot happen by accident
-  let clearArmed = false;
-  $('cartclear').onclick = () => {
-    if (!clearArmed) {
-      clearArmed = true; $('cartclear').textContent = 'Tap again to delete all';
-      setTimeout(() => { clearArmed = false; $('cartclear').textContent = 'Delete all'; }, 3000);
-      return;
-    }
-    clearArmed = false; $('cartclear').textContent = 'Delete all'; clearCart();
-  };
-
-  // ---- Confirm order ----
-  let sending = false;
-  $('cartconfirm').onclick = async () => {
-    if (sending || !cartCount()) return;
-    if (navigator.onLine === false) { $('carterr').textContent = 'No internet connection. Please try again when you are online.'; return; }
-    sending = true; $('cartconfirm').disabled = true; $('cartconfirm').textContent = 'Sending…'; $('carterr').textContent = '';
-    try {
-      const id = await submitOrder();
-      closeDrawer();
-      beginTracking(id);
-    } catch (e) {
-      console.error(e);
-      $('carterr').textContent = /confirm your order|empty/.test(e.message) ? e.message : 'Sorry, the order could not be sent. Please try again or call the waiter.';
-    } finally {
-      sending = false; $('cartconfirm').textContent = 'Confirm Order'; $('cartconfirm').disabled = !cartCount();
-    }
-  };
-
-  // ---- Live order status card ----
-  let status = null, orderId = null;
-  const card = $('orderstatus'), pill = $('orderpill');
-  function renderStatus(mode) {
-    const s = STATUS[status];
-    if (mode === 'error') { $('osicon').textContent = '⚠️'; $('ostitle').textContent = 'We lost track of your order'; $('osmsg').textContent = 'Please ask your waiter about your order.'; }
-    else if (!s) { $('osicon').textContent = '⏳'; $('ostitle').textContent = 'Connecting…'; $('osmsg').textContent = 'Checking your order with the kitchen.'; }
-    else { $('osicon').textContent = s.icon; $('ostitle').textContent = s.title; $('osmsg').textContent = s.msg; }
-    $('osmeta').textContent = (getTable() === 'Takeaway' ? 'Takeaway' : 'Table ' + getTable()) + (orderId ? ' · Order #' + orderId.slice(-5).toUpperCase() : '');
-    $('osclose').textContent = status === 'completed' ? 'Done' : 'OK';
-    pill.textContent = s ? s.pill : 'Order…';
-    pill.style.display = orderId ? 'block' : 'none';
-  }
-  function forgetOrder() {
-    orderId = null; status = null;
-    try { sessionStorage.removeItem('arm_order_id'); } catch (e) {}
-    if (stopTracking) { stopTracking(); stopTracking = null; }
-    card.classList.remove('open'); pill.style.display = 'none';
-  }
-  let lastShown = null;
-  function beginTracking(id, silent) {
-    orderId = id; status = null; lastShown = null;
-    renderStatus(); if (!silent) card.classList.add('open');
-    trackOrder(id, st => {
-      if (st === null) { forgetOrder(); return; }
-      status = st; renderStatus();
-      if (st !== lastShown) {                                                   // pop the card open on every change
-        if (!(silent && lastShown === null)) card.classList.add('open');
-        lastShown = st;
+  if (savedOrderId && overlayNode && msgNode) {
+    overlayNode.style.display = 'flex';
+    trackOrder(savedOrderId, (status) => {
+      if (status && STATUS[status]) {
+        msgNode.innerHTML = `<h3>${STATUS[status].icon} ${STATUS[status].title}</h3><p>${STATUS[status].msg}</p>`;
+        if (status === 'completed') {
+          setTimeout(() => { overlayNode.style.display = 'none'; }, 4000);
+        }
+      } else {
+        overlayNode.style.display = 'none';
       }
-    }, err => { console.warn(err); renderStatus('error'); }).catch(err => { console.warn(err); renderStatus('error'); });
+    }, (err) => console.error("Tracking connection error:", err));
   }
-  $('osclose').onclick = () => { if (status === 'completed') forgetOrder(); else card.classList.remove('open'); };
-  pill.onclick = () => card.classList.add('open');
-
-  // Customer reloads the page or moves to another dish: keep following the same order
-  let saved = null; try { saved = sessionStorage.getItem('arm_order_id'); } catch (e) {}
-  if (saved) beginTracking(saved, true);
-}
-
-if (document.getElementById('cartui') && isConfigured()) initCustomerUI();
+});
