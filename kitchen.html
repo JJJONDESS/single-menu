@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Kitchen</title>
+<style>
+  :root { --bg:#14110f; --panel:#201b18; --line:#3a312b; --text:#f4ece6; --muted:#a99a8e; --red:#e8452c; --green:#1fa855; --amber:#f0a020; --blue:#3b8de0; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; }
+  button { font: inherit; font-weight: 600; border: 0; border-radius: 10px; padding: 12px 14px; color: #fff; background: #4a403a; cursor: pointer; }
+  button:disabled { opacity: .4; cursor: default; }
+  input { font: inherit; width: 100%; padding: 12px; border-radius: 10px; border: 1px solid var(--line); background: #111; color: var(--text); }
+
+  /* ---- login (covers everything until a staff member is signed in) ---- */
+  #login { position: fixed; inset: 0; z-index: 10; display: flex; align-items: center; justify-content: center; padding: 20px; background: var(--bg); }
+  #login form { width: 100%; max-width: 360px; background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 26px; display: grid; gap: 12px; }
+  #login h1 { margin: 0 0 4px; font-size: 1.4rem; }
+  #login p { margin: 0; color: var(--muted); font-size: .9rem; }
+  #login button { background: var(--red); padding: 14px; }
+  #loginerr { color: #ff8a7a; min-height: 1.2em; font-size: .9rem; }
+
+  /* ---- dashboard ---- */
+  header.bar { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 12px; padding: 12px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  header.bar h2 { margin: 0; font-size: 1.15rem; flex: 1; }
+  header.bar span { color: var(--muted); font-size: .85rem; }
+  #conn { width: 10px; height: 10px; border-radius: 50%; background: var(--amber); display: inline-block; margin-right: 6px; }
+  #conn.ok { background: var(--green); }
+  #board { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; padding: 16px; align-items: start; }
+  #empty { text-align: center; color: var(--muted); padding: 60px 20px; display: none; }
+
+  .ticket { background: #fffdf8; color: #1c1815; border-radius: 6px; padding: 14px 16px 16px; box-shadow: 0 3px 14px rgba(0,0,0,.4);
+            border-top: 8px solid var(--amber); font-family: ui-monospace, Menlo, Consolas, monospace; }
+  .ticket.processing { border-top-color: var(--blue); }
+  .ticket.served { border-top-color: var(--green); }
+  .ticket.fresh { animation: flash 1.2s ease-out 2; }
+  @keyframes flash { 50% { box-shadow: 0 0 0 5px var(--red); } }
+  .tk-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .tk-table { font-size: 1.6rem; font-weight: 800; }
+  .tk-time { font-size: .85rem; color: #6b625b; text-align: right; }
+  .tk-status { display: inline-block; margin: 6px 0 8px; font-size: .75rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; padding: 3px 8px; border-radius: 4px; background: #f3e3b8; }
+  .processing .tk-status { background: #cfe3f8; } .served .tk-status { background: #c9ecd6; }
+  .tk-items { list-style: none; margin: 0; padding: 8px 0; border-top: 2px dashed #cfc6bd; border-bottom: 2px dashed #cfc6bd; }
+  .tk-items li { display: flex; gap: 10px; padding: 3px 0; font-size: 1.05rem; }
+  .tk-items b { min-width: 2.2em; font-size: 1.15rem; }
+  .tk-total { display: flex; justify-content: space-between; margin: 8px 0 10px; font-weight: 700; }
+  .tk-who { font-size: .8rem; color: #6b625b; margin-bottom: 8px; min-height: 1em; }
+  .tk-btns { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .tk-btns button { padding: 12px 4px; font-size: .9rem; }
+  .b-proc { background: var(--blue); } .b-serv { background: var(--green); } .b-done { background: #5a4f48; }
+  .tk-err { color: #c0392b; font-size: .8rem; margin-top: 6px; min-height: 1em; }
+</style>
+</head>
+<body>
+
+<!-- Sign-in screen: nothing is loaded from the database until a staff member signs in -->
+<div id="login">
+  <form id="loginform" autocomplete="on">
+    <h1>Kitchen sign in</h1>
+    <p>Staff only. Use the email and password the owner gave you.</p>
+    <input id="email" type="email" placeholder="Email" autocomplete="username" required>
+    <input id="password" type="password" placeholder="Password" autocomplete="current-password" required>
+    <div id="loginerr"></div>
+    <button id="loginbtn" type="submit">Sign in</button>
+  </form>
+</div>
+
+<header class="bar">
+  <h2><span id="conn"></span>Kitchen orders <span id="count"></span></h2>
+  <span id="who"></span>
+  <button id="signout" type="button" style="display:none">Sign out</button>
+</header>
+<div id="board"></div>
+<div id="empty">No open orders. New orders appear here by themselves.</div>
+
+<script type="module">
+import { isConfigured, getDb, getAuthKit } from './app.js';
+
+const $ = id => document.getElementById(id);
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+const money = n => 'Rs ' + Math.round(n).toLocaleString('en-US');
+
+let db, F, auth, U, unsub = null, seen = new Set(), firstSnapshot = true, wake = null, orders = [];
+
+// ---------- sounds + keep the tablet awake ----------
+let audio = null;
+function beep() {
+  try {
+    audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+    const o = audio.createOscillator(), g = audio.createGain();
+    o.connect(g); g.connect(audio.destination); o.type = 'sine'; o.frequency.value = 880;
+    g.gain.setValueAtTime(.25, audio.currentTime); g.gain.exponentialRampToValueAtTime(.001, audio.currentTime + .6);
+    o.start(); o.stop(audio.currentTime + .6);
+  } catch (e) {}
+}
+async function keepAwake() { try { if (navigator.wakeLock) wake = await navigator.wakeLock.request('screen'); } catch (e) {} }
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && $('login').style.display === 'none') keepAwake(); });
+
+// ---------- start ----------
+(async function init() {
+  if (!isConfigured()) { $('loginerr').textContent = 'Not set up yet: paste your Firebase settings into app.js first.'; $('loginbtn').disabled = true; return; }
+  try {
+    ({ db, F } = await getDb());
+    ({ auth, U } = await getAuthKit());
+  } catch (e) { console.error(e); $('loginerr').textContent = 'Could not load. Check the internet and reload.'; return; }
+  U.onAuthStateChanged(auth, user => user ? startBoard(user) : stopBoard());
+})();
+
+// ---------- sign in / out ----------
+$('loginform').addEventListener('submit', async ev => {
+  ev.preventDefault();
+  if (!auth) return;
+  $('loginerr').textContent = ''; $('loginbtn').disabled = true; $('loginbtn').textContent = 'Signing in…';
+  try { beep(); /* unlocks sound for later */ await U.signInWithEmailAndPassword(auth, $('email').value.trim(), $('password').value); }
+  catch (e) {
+    const c = e && e.code || '';
+    $('loginerr').textContent =
+      /invalid-credential|wrong-password|user-not-found|invalid-email/.test(c) ? 'Wrong email or password.' :
+      /too-many-requests/.test(c) ? 'Too many tries. Wait a few minutes and try again.' :
+      /network/.test(c) ? 'No internet connection.' : 'Could not sign in. Please try again.';
+  } finally { $('loginbtn').disabled = false; $('loginbtn').textContent = 'Sign in'; }
+});
+$('signout').onclick = () => U.signOut(auth);
+
+function stopBoard() {
+  if (unsub) { unsub(); unsub = null; }
+  orders = []; seen = new Set(); firstSnapshot = true;
+  $('board').textContent = ''; $('empty').style.display = 'none'; $('count').textContent = '';
+  $('who').textContent = ''; $('signout').style.display = 'none'; $('conn').className = '';
+  $('login').style.display = 'flex'; $('password').value = '';
+  if (wake) { try { wake.release(); } catch (e) {} wake = null; }
+}
+
+// ---------- live orders (only after a successful sign in) ----------
+function startBoard(user) {
+  $('login').style.display = 'none';
+  $('who').textContent = user.email; $('signout').style.display = '';
+  keepAwake();
+  // Open orders from the last 24 hours, oldest first. (Completed ones are removed from the screen below.)
+  const since = F.Timestamp.fromMillis(Date.now() - 24 * 3600 * 1000);
+  const q = F.query(F.collection(db, 'orders'), F.where('timestamp', '>=', since), F.orderBy('timestamp', 'asc'));
+  if (unsub) unsub();
+  unsub = F.onSnapshot(q, snap => {
+    $('conn').className = 'ok';
+    orders = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(o => o.status !== 'completed');
+    let isNew = false;
+    orders.forEach(o => { if (!seen.has(o.id)) { seen.add(o.id); if (!firstSnapshot) { o.fresh = true; isNew = true; } } });
+    firstSnapshot = false;
+    if (isNew) beep();
+    render();
+  }, err => {
+    console.error(err);
+    $('conn').className = '';
+    if (err && err.code === 'permission-denied') {
+      $('loginerr').textContent = 'This account is not allowed to see orders. Ask the owner to add your email in the security rules.';
+      U.signOut(auth);
+    }
+  });
+}
+
+function ago(ts) {
+  if (!ts) return '';
+  const m = Math.max(0, Math.round((Date.now() - ts.toDate().getTime()) / 60000));
+  return m < 1 ? 'just now' : m + ' min ago';
+}
+
+function render() {
+  const board = $('board');
+  board.textContent = '';
+  $('empty').style.display = orders.length ? 'none' : 'block';
+  $('count').textContent = orders.length ? '(' + orders.length + ')' : '';
+  orders.forEach(o => {
+    const t = el('article', 'ticket ' + o.status + (o.fresh ? ' fresh' : ''));
+    const head = el('div', 'tk-head');
+    head.append(el('div', 'tk-table', /^\d+$/.test(o.table_number) ? 'Table ' + o.table_number : String(o.table_number || '?')));
+    const time = el('div', 'tk-time');
+    time.append(el('div', '', o.timestamp ? o.timestamp.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''), el('div', 'ago', ago(o.timestamp)));
+    time.querySelector('.ago').dataset.ts = o.timestamp ? o.timestamp.toMillis() : '';
+    head.append(time);
+    t.append(head, el('span', 'tk-status', o.status));
+
+    const ul = el('ul', 'tk-items');
+    (Array.isArray(o.items) ? o.items : []).forEach(i => {
+      const li = el('li');
+      li.append(el('b', '', (Number(i.qty) || 0) + '×'), el('span', '', String(i.dish_name || i.dish_id || '?')));   // textContent only: customer text is never trusted as HTML
+      ul.append(li);
+    });
+    t.append(ul);
+    const total = el('div', 'tk-total'); total.append(el('span', '', 'Total'), el('span', '', money(Number(o.total_bill) || 0)));
+    t.append(total, el('div', 'tk-who', o.assigned_employee ? 'Served by ' + o.assigned_employee : ''));
+
+    const err = el('div', 'tk-err');
+    const btns = el('div', 'tk-btns');
+    const mk = (label, cls, disabled, patch) => {
+      const b = el('button', cls, label); b.type = 'button'; b.disabled = disabled;
+      b.onclick = async () => {
+        btns.querySelectorAll('button').forEach(x => x.disabled = true); err.textContent = '';
+        try { await F.updateDoc(F.doc(db, 'orders', o.id), patch()); }
+        catch (e) { console.error(e); err.textContent = 'Could not save. Check the internet and try again.'; btns.querySelectorAll('button').forEach(x => x.disabled = false); }
+      };
+      return b;
+    };
+    btns.append(
+      mk('Processing', 'b-proc', o.status === 'processing', () => ({ status: 'processing' })),
+      mk('Served', 'b-serv', o.status === 'served', () => ({ status: 'served', assigned_employee: auth.currentUser.email })),
+      mk('Complete', 'b-done', false, () => ({ status: 'completed' }))
+    );
+    t.append(btns, err);
+    board.append(t);
+    o.fresh = false;
+  });
+}
+setInterval(() => document.querySelectorAll('.ago').forEach(a => {   // keep "5 min ago" fresh without redrawing
+  const ms = Number(a.dataset.ts); if (ms) { const m = Math.max(0, Math.round((Date.now() - ms) / 60000)); a.textContent = m < 1 ? 'just now' : m + ' min ago'; }
+}), 30000);
+</script>
+</body>
+</html>
