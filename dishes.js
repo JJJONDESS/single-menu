@@ -38,7 +38,7 @@ const DISHES = {
 // >>> NEW PIPELINE FUNCTION: Sends your active WebXR menu choice straight to Odoo
 function placeOdooOrder() {
     // Paste your active live Ngrok forwarding URL address here from your black tunnel window
-    const ODOO_API_ENDPOINT = "https://ngrok-free.app";
+    const ODOO_API_ENDPOINT = "https://overprice-carless-commute.ngrok-free.dev -> http://localhost:8069";
 
     const odooOrderPacket = {
         "params": {
