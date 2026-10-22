@@ -148,7 +148,7 @@ function startBoard(user) {
   $('who').textContent = user.email; $('signout').style.display = '';
   keepAwake();
   
-  const since = F.Timestamp.fromMillis(Date.now() - 24 * 3600 * 1000);
+  const since = F.Timestamp.fromMillis(Date.now() - 7 * 24 * 3600 * 1000);
   const q = F.query(F.collection(db, 'orders'), F.where('timestamp', '>=', since), F.orderBy('timestamp', 'asc'));
   if (unsub) unsub();
   unsub = F.onSnapshot(q, snap => {
