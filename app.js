@@ -10,24 +10,18 @@ export const FIREBASE_CONFIG = {
   messagingSenderId: '386962130068',
   appId: '1:386962130068:web:0b2ff00852ebfd18cce081'
 };
-// These values are NOT secret: every website that uses Firebase shows them. Your data is protected by
-// the security rules (firestore.rules), not by hiding this block.
 
-const CURRENCY = 'Rs';                       // shown before prices
+const CURRENCY = 'Rs';
 const SDK = 'https://www.gstatic.com/firebasejs/10.14.1/';
 
 export const isConfigured = () =>
   !!FIREBASE_CONFIG.apiKey && !/^PASTE/.test(FIREBASE_CONFIG.apiKey) &&
   !!FIREBASE_CONFIG.projectId && !/^PASTE/.test(FIREBASE_CONFIG.projectId);
 
-// ----------------------------------------------------------------------------
-//  Firebase (v10 modular SDK). It is downloaded only when it is really needed,
-//  so the menu page stays fast.
-// ----------------------------------------------------------------------------
 let dbPromise = null, authPromise = null;
 
-export function getDb() {                    // -> { app, db, F }   (F = the firestore functions)
-  if (!isConfigured()) return Promise.reject(new Error('Firebase is not set up yet. Fill in FIREBASE_CONFIG in app.js.'));
+export function getDb() {
+  if (!isConfigured()) return Promise.reject(new Error('Firebase is not set up yet.'));
   if (!dbPromise) dbPromise = (async () => {
     const [A, F] = await Promise.all([import(SDK + 'firebase-app.js'), import(SDK + 'firebase-firestore.js')]);
     const app = A.initializeApp(FIREBASE_CONFIG);
@@ -36,7 +30,7 @@ export function getDb() {                    // -> { app, db, F }   (F = the fir
   return dbPromise;
 }
 
-export function getAuthKit() {               // -> { auth, U }   (U = the auth functions)
+export function getAuthKit() {
   if (!authPromise) authPromise = (async () => {
     const { app } = await getDb();
     const U = await import(SDK + 'firebase-auth.js');
@@ -45,9 +39,6 @@ export function getAuthKit() {               // -> { auth, U }   (U = the auth f
   return authPromise;
 }
 
-// ----------------------------------------------------------------------------
-//  Table number:  https://yoursite/?table=4   (remembered using localStorage)
-// ----------------------------------------------------------------------------
 export function getTable() {
   const clean = v => String(v || '').replace(/[^\w\- ]/g, '').trim().slice(0, 20);
   const fromUrl = clean(new URLSearchParams(location.search).get('table'));
@@ -55,12 +46,9 @@ export function getTable() {
   try { return clean(localStorage.getItem('arm_table')) || 'Takeaway'; } catch (e) { return 'Takeaway'; }
 }
 
-// ----------------------------------------------------------------------------
-//  Shopping cart (kept in localStorage, so it survives moving between the menu and the dish pages)
-// ----------------------------------------------------------------------------
 const CART_KEY = 'arm_cart_v1';
 const dishOf = id => (typeof DISHES !== 'undefined') ? DISHES[id] : undefined;
-export function priceOf(d) {                 // 'Rs 1,450' or 1450 -> 1450 (0 = no price, cannot be ordered)
+export function priceOf(d) {
   if (!d) return 0;
   const n = typeof d.price === 'number' ? d.price : parseFloat(String(d.price || '').replace(/,/g, '').replace(/[^\d.]/g, ''));
   return isFinite(n) && n > 0 ? n : 0;
@@ -79,7 +67,7 @@ function loadCart() {
 let cart = loadCart();
 function save() { try { localStorage.setItem(CART_KEY, JSON.stringify(cart)); } catch (e) {} changeListeners.forEach(f => f()); }
 
-export function addItem(id) {                // adds 1, or +1 if the dish is already in the cart
+export function addItem(id) {
   const d = dishOf(id), p = priceOf(d);
   if (!d || !p) return false;
   const found = cart.find(i => i.id === id);
@@ -87,32 +75,39 @@ export function addItem(id) {                // adds 1, or +1 if the dish is alr
   else cart.push({ id, name: d.name, price: p, qty: 1 });
   save(); return true;
 }
-export function changeQty(id, delta) {       // the + and - buttons (qty 0 removes the line)
+export function changeQty(id, delta) {
   cart = cart.map(i => i.id === id ? { ...i, qty: Math.min(99, i.qty + delta) } : i).filter(i => i.qty > 0);
   save();
 }
-export function removeItem(id) { cart = cart.filter(i => i.id !== id); save(); }      // delete one line
-export function clearCart() { cart = []; save(); }                                       // "Delete all"
+export function removeItem(id) { cart = cart.filter(i => i.id !== id); save(); }
+export function clearCart() { cart = []; save(); }
 export const cartCount = () => cart.reduce((s, i) => s + i.qty, 0);
 export const cartTotal = () => cart.reduce((s, i) => s + i.qty * i.price, 0);
 export const getCart = () => cart.map(i => ({ ...i }));
 window.addEventListener('storage', e => { if (e.key === CART_KEY) { cart = loadCart(); changeListeners.forEach(f => f()); } });
 
-// ----------------------------------------------------------------------------
-//  Sending the order to Firestore
-// ----------------------------------------------------------------------------
 const withTimeout = (p, ms, msg) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(msg)), ms))]);
 
 export async function submitOrder() {
   const items = cart.map(i => {
-    const live = priceOf(dishOf(i.id)) || i.price;                 // use the current price from dishes.js
+    const live = priceOf(dishOf(i.id)) || i.price;
     return { dish_id: i.id, dish_name: i.name, qty: i.qty, price: live };
   });
   if (!items.length) throw new Error('Your cart is empty.');
   const total = items.reduce((s, i) => s + i.qty * i.price, 0);
+  
+  // Get Customer Name
+  const custNameEl = document.getElementById('custname');
+  const customer_name = custNameEl && custNameEl.value.trim() ? custNameEl.value.trim() : 'Guest';
+  
+  // Generate a 4-digit numeric Token
+  const token_number = Math.floor(1000 + Math.random() * 9000);
+
   const { db, F } = await getDb();
   const ref = await withTimeout(F.addDoc(F.collection(db, 'orders'), {
     table_number: getTable(),
+    customer_name: customer_name,
+    token_number: token_number,
     items,
     total_bill: total,
     status: 'pending',
@@ -121,7 +116,6 @@ export async function submitOrder() {
   }), 30000, 'We could not confirm your order. Please check your internet and ask your waiter before ordering again.');
   
   try { 
-    // Get the list of active orders, add the new one, and save it permanently
     let active = JSON.parse(localStorage.getItem('arm_active_orders') || '[]');
     if (!active.includes(ref.id)) active.push(ref.id);
     localStorage.setItem('arm_active_orders', JSON.stringify(active));
@@ -131,33 +125,30 @@ export async function submitOrder() {
   return ref.id;
 }
 
-// Live status of multiple orders
 export async function trackOrder(id, onStatus, onError) {
   const { db, F } = await getDb();
-  // Return the unsubscribe function so the UI can stop listening when an order is done
   return F.onSnapshot(F.doc(db, 'orders', id),
-    snap => onStatus(snap.exists() ? snap.data().status : null),
+    snap => onStatus(snap.exists() ? { id: snap.id, ...snap.data() } : null),
     err => onError && onError(err));
 }
 
 // ============================================================================
-//  Customer screen (only runs on pages that contain <div id="cartui"> i.e. index.html)
+//  Customer screen
 // ============================================================================
 const $ = id => document.getElementById(id);
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 
 const STATUS = {
-  pending:    { icon: '⏳',         title: 'Order sent',        pill: 'Order sent',  msg: 'The kitchen has your order and will start soon.' },
+  pending:    { icon: '⏳', title: 'Order sent', pill: 'Order sent', msg: 'The kitchen has your order and will start soon.' },
   processing: { icon: '👨‍🍳', title: 'Cooking now', pill: 'Preparing…', msg: 'Your food is being prepared in the kitchen!' },
-  served:     { icon: '🍽️', title: 'On its way',   pill: 'On its way',  msg: 'Your food is on its way to your table!' },
-  completed:  { icon: '✅',         title: 'Enjoy your meal!',  pill: 'Completed',   msg: 'Your order is complete. Thank you!' }
+  served:     { icon: '🍽️', title: 'On its way', pill: 'On its way', msg: 'Your food is on its way to your table!' },
+  completed:  { icon: '✅', title: 'Enjoy your meal!', pill: 'Completed', msg: 'Your order is complete. Thank you!' }
 };
 
 function initCustomerUI() {
   document.body.classList.add('ordering-on');
-  if ($('wa')) $('wa').style.display = 'none';                       // the cart replaces the WhatsApp button
+  if ($('wa')) $('wa').style.display = 'none';
 
-  // ---- Add buttons (menu cards and the dish page) ----
   const refreshAddButtons = () => document.querySelectorAll('[data-add]').forEach(b => { b.hidden = !priceOf(dishOf(b.dataset.add)); });
   refreshAddButtons();
   document.addEventListener('click', e => {
@@ -170,7 +161,6 @@ function initCustomerUI() {
     }
   });
 
-  // ---- Cart drawer ----
   const drawer = $('cartdrawer'), back = $('cartback');
   const openDrawer = () => { renderCart(); drawer.classList.add('open'); back.classList.add('open'); $('carterr').textContent = ''; };
   const closeDrawer = () => { drawer.classList.remove('open'); back.classList.remove('open'); };
@@ -206,7 +196,6 @@ function initCustomerUI() {
   changeListeners.add(() => { renderBadge(); if (drawer.classList.contains('open')) renderCart(); });
   renderBadge();
 
-  // "Delete all" needs two taps so it cannot happen by accident
   let clearArmed = false;
   $('cartclear').onclick = () => {
     if (!clearArmed) {
@@ -217,7 +206,6 @@ function initCustomerUI() {
     clearArmed = false; $('cartclear').textContent = 'Delete all'; clearCart();
   };
 
-  // ---- Confirm order ----
   let sending = false;
   $('cartconfirm').onclick = async () => {
     if (sending || !cartCount()) return;
@@ -226,7 +214,7 @@ function initCustomerUI() {
     try {
       const id = await submitOrder();
       closeDrawer();
-      beginTracking(id); // Start tracking the new order immediately
+      beginTracking(id); 
     } catch (e) {
       console.error(e);
       $('carterr').textContent = /confirm your order|empty/.test(e.message) ? e.message : 'Sorry, the order could not be sent. Please try again or call the waiter.';
@@ -236,24 +224,45 @@ function initCustomerUI() {
   };
 
   // ---- Live order status card ----
-  let status = null, currentModalOrderId = null;
+  let currentOrderData = null, currentModalOrderId = null;
   let activeOrders = [];
-  let trackers = {}; // Keeps track of the Firestore listeners
+  let trackers = {}; 
 
   try { activeOrders = JSON.parse(localStorage.getItem('arm_active_orders') || '[]'); } catch (e) {}
   
   const card = $('orderstatus'), pill = $('orderpill');
 
   function renderStatus(mode) {
-    const s = STATUS[status];
-    if (mode === 'error') { $('osicon').textContent = '⚠️'; $('ostitle').textContent = 'We lost track of your order'; $('osmsg').textContent = 'Please ask your waiter about your order.'; }
-    else if (!s) { $('osicon').textContent = '⏳'; $('ostitle').textContent = 'Connecting…'; $('osmsg').textContent = 'Checking your order with the kitchen.'; }
-    else { $('osicon').textContent = s.icon; $('ostitle').textContent = s.title; $('osmsg').textContent = s.msg; }
+    const s = currentOrderData ? STATUS[currentOrderData.status] : null;
     
-    $('osmeta').textContent = (getTable() === 'Takeaway' ? 'Takeaway' : 'Table ' + getTable()) + (currentModalOrderId ? ' · Order #' + currentModalOrderId.slice(-5).toUpperCase() : '');
-    $('osclose').textContent = status === 'completed' ? 'Done' : 'OK';
+    if (mode === 'error') { 
+      $('osicon').textContent = '⚠️'; $('ostitle').textContent = 'We lost track of your order'; $('osmsg').textContent = 'Please ask your waiter about your order.'; 
+    } else if (!s) { 
+      $('osicon').textContent = '⏳'; $('ostitle').textContent = 'Connecting…'; $('osmsg').textContent = 'Checking your order with the kitchen.'; 
+    } else { 
+      $('osicon').textContent = s.icon; $('ostitle').textContent = s.title; $('osmsg').textContent = s.msg; 
+    }
     
-    // If they have multiple active orders, show a count
+    // Build the list of items to show in the modal
+    let itemsHtml = '';
+    if (currentOrderData && currentOrderData.items) {
+      currentOrderData.items.forEach(i => {
+        itemsHtml += `<div style="display:flex; justify-content:space-between; margin-bottom:4px; font-size:0.9rem; color:#444;">
+          <span>${i.qty}x ${i.dish_name}</span>
+          <span>Rs ${Math.round(i.price)}</span>
+        </div>`;
+      });
+    }
+    
+    // Inject items into the modal
+    $('osmsg').innerHTML = `<div style="margin-bottom:12px;">${s ? s.msg : 'Checking...'}</div>` + 
+                           (itemsHtml ? `<div style="border-top:1px solid #eee; padding-top:8px;">${itemsHtml}</div>` : '');
+    
+    const token = currentOrderData && currentOrderData.token_number ? `Token #${currentOrderData.token_number}` : (currentModalOrderId ? 'Order #' + currentModalOrderId.slice(-5).toUpperCase() : '');
+    $('osmeta').textContent = (getTable() === 'Takeaway' ? 'Takeaway' : 'Table ' + getTable()) + (token ? ' · ' + token : '');
+    
+    $('osclose').textContent = (currentOrderData && currentOrderData.status === 'completed') ? 'Done' : 'OK';
+    
     const pillText = s ? s.pill : 'Order…';
     pill.textContent = activeOrders.length > 1 ? `Orders (${activeOrders.length})` : pillText;
     pill.style.display = activeOrders.length > 0 ? 'block' : 'none';
@@ -267,13 +276,12 @@ function initCustomerUI() {
     }
     
     if (activeOrders.length === 0) {
-      currentModalOrderId = null; status = null;
+      currentModalOrderId = null; currentOrderData = null;
       card.classList.remove('open'); pill.style.display = 'none';
     } else {
-      // If the order they are viewing completes, switch the modal to their next active order
       if (currentModalOrderId === idToRemove) {
         currentModalOrderId = activeOrders[activeOrders.length - 1];
-        status = null; 
+        currentOrderData = null; 
         renderStatus();
       }
     }
@@ -285,26 +293,25 @@ function initCustomerUI() {
     try { localStorage.setItem('arm_active_orders', JSON.stringify(activeOrders)); } catch (e) {}
     
     currentModalOrderId = id; 
-    status = null; lastShown = null;
+    currentOrderData = null; lastShown = null;
     renderStatus(); 
     if (!silent) card.classList.add('open');
     
-    if (trackers[id]) trackers[id](); // Stop old listener if it exists
+    if (trackers[id]) trackers[id](); 
     
-    trackers[id] = trackOrder(id, st => {
-      if (st === null) { forgetOrder(id); return; }
+    trackers[id] = trackOrder(id, orderData => {
+      if (orderData === null) { forgetOrder(id); return; }
       
-      // Only update the visual modal if they are looking at THIS specific order
       if (currentModalOrderId === id) {
-        status = st; renderStatus();
-        if (st !== lastShown) {
+        currentOrderData = orderData; 
+        renderStatus();
+        if (orderData.status !== lastShown) {
           if (!(silent && lastShown === null)) card.classList.add('open');
-          lastShown = st;
+          lastShown = orderData.status;
         }
       }
       
-      // If the kitchen marks it as completed, auto-remove it from their device after 5 seconds
-      if (st === 'completed') {
+      if (orderData.status === 'completed') {
         setTimeout(() => forgetOrder(id), 5000);
       }
     }, err => { 
@@ -314,26 +321,23 @@ function initCustomerUI() {
   }
 
   $('osclose').onclick = () => { 
-    if (status === 'completed') forgetOrder(currentModalOrderId); 
+    if (currentOrderData && currentOrderData.status === 'completed') forgetOrder(currentModalOrderId); 
     else card.classList.remove('open'); 
   };
   
   pill.onclick = () => {
-    // If they have multiple orders, clicking the pill shows the most recent one
     if (activeOrders.length > 0 && !currentModalOrderId) {
       currentModalOrderId = activeOrders[activeOrders.length - 1];
     }
     card.classList.add('open');
   };
 
-  // Customer opens the page: Resume tracking ALL their active orders
   if (activeOrders.length > 0) {
-    // Start tracking the latest order visibly, and the rest silently
     activeOrders.forEach((id, index) => {
       beginTracking(id, index !== activeOrders.length - 1);
     });
   }
 
-} // end of initCustomerUI
+}
 
 if (document.getElementById('cartui') && isConfigured()) initCustomerUI();
