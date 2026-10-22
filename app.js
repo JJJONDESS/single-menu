@@ -96,11 +96,9 @@ export async function submitOrder() {
   if (!items.length) throw new Error('Your cart is empty.');
   const total = items.reduce((s, i) => s + i.qty * i.price, 0);
   
-  // Get Customer Name
   const custNameEl = document.getElementById('custname');
   const customer_name = custNameEl && custNameEl.value.trim() ? custNameEl.value.trim() : 'Guest';
   
-  // Generate a 4-digit numeric Token
   const token_number = Math.floor(1000 + Math.random() * 9000);
 
   const { db, F } = await getDb();
@@ -243,7 +241,6 @@ function initCustomerUI() {
       $('osicon').textContent = s.icon; $('ostitle').textContent = s.title; $('osmsg').textContent = s.msg; 
     }
     
-    // Build the list of items to show in the modal
     let itemsHtml = '';
     if (currentOrderData && currentOrderData.items) {
       currentOrderData.items.forEach(i => {
@@ -254,7 +251,6 @@ function initCustomerUI() {
       });
     }
     
-    // Inject items into the modal
     $('osmsg').innerHTML = `<div style="margin-bottom:12px;">${s ? s.msg : 'Checking...'}</div>` + 
                            (itemsHtml ? `<div style="border-top:1px solid #eee; padding-top:8px;">${itemsHtml}</div>` : '');
     
@@ -272,12 +268,18 @@ function initCustomerUI() {
     if (idToRemove) {
       activeOrders = activeOrders.filter(id => id !== idToRemove);
       try { localStorage.setItem('arm_active_orders', JSON.stringify(activeOrders)); } catch (e) {}
-      if (trackers[idToRemove]) { trackers[idToRemove](); delete trackers[idToRemove]; }
+      
+      if (trackers[idToRemove]) { 
+        try { trackers[idToRemove](); } catch (e) { console.warn(e); }
+        delete trackers[idToRemove]; 
+      }
     }
     
     if (activeOrders.length === 0) {
-      currentModalOrderId = null; currentOrderData = null;
-      card.classList.remove('open'); pill.style.display = 'none';
+      currentModalOrderId = null; 
+      currentOrderData = null;
+      card.classList.remove('open'); 
+      pill.style.display = 'none';
     } else {
       if (currentModalOrderId === idToRemove) {
         currentModalOrderId = activeOrders[activeOrders.length - 1];
@@ -297,7 +299,9 @@ function initCustomerUI() {
     renderStatus(); 
     if (!silent) card.classList.add('open');
     
-    if (trackers[id]) trackers[id](); 
+    if (trackers[id]) {
+      try { trackers[id](); } catch (e) {}
+    }
     
     trackers[id] = trackOrder(id, orderData => {
       if (orderData === null) { forgetOrder(id); return; }
@@ -312,7 +316,10 @@ function initCustomerUI() {
       }
       
       if (orderData.status === 'completed') {
-        setTimeout(() => forgetOrder(id), 5000);
+        setTimeout(() => {
+          if (currentModalOrderId === id) card.classList.remove('open');
+          forgetOrder(id);
+        }, 5000);
       }
     }, err => { 
       console.warn(err); 
@@ -320,9 +327,12 @@ function initCustomerUI() {
     });
   }
 
+  // Fixed the button so it visually closes the modal FIRST, then cleans up.
   $('osclose').onclick = () => { 
-    if (currentOrderData && currentOrderData.status === 'completed') forgetOrder(currentModalOrderId); 
-    else card.classList.remove('open'); 
+    card.classList.remove('open'); 
+    if (currentOrderData && currentOrderData.status === 'completed') {
+      forgetOrder(currentModalOrderId); 
+    }
   };
   
   pill.onclick = () => {
