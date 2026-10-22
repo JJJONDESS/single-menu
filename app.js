@@ -111,46 +111,53 @@ const withTimeout = (p, ms, msg) => Promise.race([p, new Promise((_, rej) => set
 
 // Paste this connection block straight into your app.js submitOrder function:
 export async function submitOrder() {
-  const items = cart.map(i => ({
-    product_id: i.id,    // Matches the "Internal Reference" text string in Odoo
-    qty: i.qty
-  }));
+  const items = cart.map(i => {
+    return [0, 0, {
+      product_id: i.id, // Must match the internal reference string in Odoo exactly
+      qty: i.qty
+    }];
+  });
 
   if (!items.length) throw new Error('Your cart is empty.');
 
-  // JSON-RPC payload structured natively for local Odoo database controller routers
+  // The EXACT Odoo JSON-RPC system data packet format
   const odooPayload = {
     jsonrpc: "2.0",
     method: "call",
     params: {
-      db: "melt9_pos",      // Check your local Odoo login screen for this exact name
-      login: "landscapewebsitedesign@gmail.com", // Your Odoo Administrator username
-      password: "Asdfvcxz_01",      // The password you use to log into localhost:8069
-      table_number: getTable(),
-      order_lines: items
-    }
+      db: "YOUR_ODOO_DATABASE_NAME", // ⚠️ Must match your exact local database name!
+      login: "landscapewebsitedesign@gmail.com",
+      password: "YOUR_ODOO_LOGIN_PASSWORD", // ⚠️ Must match your actual Odoo login password!
+      model: "pos.order",
+      method: "create_from_ui", // Tells Odoo to create a live POS ticket
+      args: [[{
+        lines: items,
+        table_number: getTable() || "Takeaway",
+        amount_total: cartTotal()
+      }]]
+    },
+    id: Math.floor(Math.random() * 1000)
   };
 
-  // Change your fetch URL to use your unique ngrok address:
-const response = await fetch("https://overprice-carless-commute.ngrok-free.dev/jsonrpc", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify(odooPayload)
-});
+  // Double check your clean ngrok url parameter injection
+  const response = await fetch("https://overprice-carless-commute.ngrok-free.dev/jsonrpc", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(odooPayload)
+  });
 
   if (!response.ok) {
-    throw new Error("POS Gateway routing timed out. Please check if your local server is running.");
+    throw new Error("POS Connection failed.");
   }
 
   const data = await response.json();
   
   if (data.error) {
-    console.error("Odoo error response payload details:", data.error);
-    throw new Error("Odoo validation error: " + data.error.message);
+    console.error("Odoo specific validation failure:", data.error);
+    throw new Error(data.error.message);
   }
 
-  // Clear tracking tokens gracefully
-  try { localStorage.setItem('arm_order_id', 'local_test_' + Date.now()); } catch (e) {}
+  try { localStorage.setItem('arm_order_id', 'local_' + Date.now()); } catch (e) {}
   clearCart();
   return true;
 }
