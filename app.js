@@ -1,11 +1,5 @@
 // ============================================================================
 //  app.js  -  shared by index.html (customer cart) and kitchen.html (staff screen)
-//
-//  1. Paste YOUR Firebase settings into FIREBASE_CONFIG below (steps are in the setup guide).
-//  2. Nothing else in this file needs editing.
-//
-//  Until FIREBASE_CONFIG is filled in, ordering stays switched OFF and the
-//  customer pages behave exactly as before (WhatsApp button, no cart).
 // ============================================================================
 
 export const FIREBASE_CONFIG = {
@@ -52,13 +46,13 @@ export function getAuthKit() {               // -> { auth, U }   (U = the auth f
 }
 
 // ----------------------------------------------------------------------------
-//  Table number:  https://yoursite/?table=4   (remembered while the customer moves between pages)
+//  Table number:  https://yoursite/?table=4   (remembered using localStorage)
 // ----------------------------------------------------------------------------
 export function getTable() {
   const clean = v => String(v || '').replace(/[^\w\- ]/g, '').trim().slice(0, 20);
   const fromUrl = clean(new URLSearchParams(location.search).get('table'));
-  if (fromUrl) { try { sessionStorage.setItem('arm_table', fromUrl); } catch (e) {} return fromUrl; }
-  try { return clean(sessionStorage.getItem('arm_table')) || 'Takeaway'; } catch (e) { return 'Takeaway'; }
+  if (fromUrl) { try { localStorage.setItem('arm_table', fromUrl); } catch (e) {} return fromUrl; }
+  try { return clean(localStorage.getItem('arm_table')) || 'Takeaway'; } catch (e) { return 'Takeaway'; }
 }
 
 // ----------------------------------------------------------------------------
@@ -125,17 +119,23 @@ export async function submitOrder() {
     assigned_employee: null,
     timestamp: F.serverTimestamp()
   }), 30000, 'We could not confirm your order. Please check your internet and ask your waiter before ordering again.');
-  try { sessionStorage.setItem('arm_order_id', ref.id); } catch (e) {}
+  
+  try { 
+    // Get the list of active orders, add the new one, and save it permanently
+    let active = JSON.parse(localStorage.getItem('arm_active_orders') || '[]');
+    if (!active.includes(ref.id)) active.push(ref.id);
+    localStorage.setItem('arm_active_orders', JSON.stringify(active));
+  } catch (e) {}
+  
   clearCart();
   return ref.id;
 }
 
-// Live status of one order (pending -> processing -> served -> completed)
-let stopTracking = null;
+// Live status of multiple orders
 export async function trackOrder(id, onStatus, onError) {
   const { db, F } = await getDb();
-  if (stopTracking) stopTracking();
-  stopTracking = F.onSnapshot(F.doc(db, 'orders', id),
+  // Return the unsubscribe function so the UI can stop listening when an order is done
+  return F.onSnapshot(F.doc(db, 'orders', id),
     snap => onStatus(snap.exists() ? snap.data().status : null),
     err => onError && onError(err));
 }
@@ -226,7 +226,7 @@ function initCustomerUI() {
     try {
       const id = await submitOrder();
       closeDrawer();
-      beginTracking(id);
+      beginTracking(id); // Start tracking the new order immediately
     } catch (e) {
       console.error(e);
       $('carterr').textContent = /confirm your order|empty/.test(e.message) ? e.message : 'Sorry, the order could not be sent. Please try again or call the waiter.';
@@ -236,43 +236,104 @@ function initCustomerUI() {
   };
 
   // ---- Live order status card ----
-  let status = null, orderId = null;
+  let status = null, currentModalOrderId = null;
+  let activeOrders = [];
+  let trackers = {}; // Keeps track of the Firestore listeners
+
+  try { activeOrders = JSON.parse(localStorage.getItem('arm_active_orders') || '[]'); } catch (e) {}
+  
   const card = $('orderstatus'), pill = $('orderpill');
+
   function renderStatus(mode) {
     const s = STATUS[status];
     if (mode === 'error') { $('osicon').textContent = '⚠️'; $('ostitle').textContent = 'We lost track of your order'; $('osmsg').textContent = 'Please ask your waiter about your order.'; }
     else if (!s) { $('osicon').textContent = '⏳'; $('ostitle').textContent = 'Connecting…'; $('osmsg').textContent = 'Checking your order with the kitchen.'; }
     else { $('osicon').textContent = s.icon; $('ostitle').textContent = s.title; $('osmsg').textContent = s.msg; }
-    $('osmeta').textContent = (getTable() === 'Takeaway' ? 'Takeaway' : 'Table ' + getTable()) + (orderId ? ' · Order #' + orderId.slice(-5).toUpperCase() : '');
+    
+    $('osmeta').textContent = (getTable() === 'Takeaway' ? 'Takeaway' : 'Table ' + getTable()) + (currentModalOrderId ? ' · Order #' + currentModalOrderId.slice(-5).toUpperCase() : '');
     $('osclose').textContent = status === 'completed' ? 'Done' : 'OK';
-    pill.textContent = s ? s.pill : 'Order…';
-    pill.style.display = orderId ? 'block' : 'none';
+    
+    // If they have multiple active orders, show a count
+    const pillText = s ? s.pill : 'Order…';
+    pill.textContent = activeOrders.length > 1 ? `Orders (${activeOrders.length})` : pillText;
+    pill.style.display = activeOrders.length > 0 ? 'block' : 'none';
   }
-  function forgetOrder() {
-    orderId = null; status = null;
-    try { sessionStorage.removeItem('arm_order_id'); } catch (e) {}
-    if (stopTracking) { stopTracking(); stopTracking = null; }
-    card.classList.remove('open'); pill.style.display = 'none';
+
+  function forgetOrder(idToRemove) {
+    if (idToRemove) {
+      activeOrders = activeOrders.filter(id => id !== idToRemove);
+      try { localStorage.setItem('arm_active_orders', JSON.stringify(activeOrders)); } catch (e) {}
+      if (trackers[idToRemove]) { trackers[idToRemove](); delete trackers[idToRemove]; }
+    }
+    
+    if (activeOrders.length === 0) {
+      currentModalOrderId = null; status = null;
+      card.classList.remove('open'); pill.style.display = 'none';
+    } else {
+      // If the order they are viewing completes, switch the modal to their next active order
+      if (currentModalOrderId === idToRemove) {
+        currentModalOrderId = activeOrders[activeOrders.length - 1];
+        status = null; 
+        renderStatus();
+      }
+    }
   }
+
   let lastShown = null;
   function beginTracking(id, silent) {
-    orderId = id; status = null; lastShown = null;
-    renderStatus(); if (!silent) card.classList.add('open');
-    trackOrder(id, st => {
-      if (st === null) { forgetOrder(); return; }
-      status = st; renderStatus();
-      if (st !== lastShown) {                                                   // pop the card open on every change
-        if (!(silent && lastShown === null)) card.classList.add('open');
-        lastShown = st;
+    if (!activeOrders.includes(id)) activeOrders.push(id);
+    try { localStorage.setItem('arm_active_orders', JSON.stringify(activeOrders)); } catch (e) {}
+    
+    currentModalOrderId = id; 
+    status = null; lastShown = null;
+    renderStatus(); 
+    if (!silent) card.classList.add('open');
+    
+    if (trackers[id]) trackers[id](); // Stop old listener if it exists
+    
+    trackers[id] = trackOrder(id, st => {
+      if (st === null) { forgetOrder(id); return; }
+      
+      // Only update the visual modal if they are looking at THIS specific order
+      if (currentModalOrderId === id) {
+        status = st; renderStatus();
+        if (st !== lastShown) {
+          if (!(silent && lastShown === null)) card.classList.add('open');
+          lastShown = st;
+        }
       }
-    }, err => { console.warn(err); renderStatus('error'); }).catch(err => { console.warn(err); renderStatus('error'); });
+      
+      // If the kitchen marks it as completed, auto-remove it from their device after 5 seconds
+      if (st === 'completed') {
+        setTimeout(() => forgetOrder(id), 5000);
+      }
+    }, err => { 
+      console.warn(err); 
+      if (currentModalOrderId === id) renderStatus('error'); 
+    });
   }
-  $('osclose').onclick = () => { if (status === 'completed') forgetOrder(); else card.classList.remove('open'); };
-  pill.onclick = () => card.classList.add('open');
 
-  // Customer reloads the page or moves to another dish: keep following the same order
-  let saved = null; try { saved = sessionStorage.getItem('arm_order_id'); } catch (e) {}
-  if (saved) beginTracking(saved, true);
-}
+  $('osclose').onclick = () => { 
+    if (status === 'completed') forgetOrder(currentModalOrderId); 
+    else card.classList.remove('open'); 
+  };
+  
+  pill.onclick = () => {
+    // If they have multiple orders, clicking the pill shows the most recent one
+    if (activeOrders.length > 0 && !currentModalOrderId) {
+      currentModalOrderId = activeOrders[activeOrders.length - 1];
+    }
+    card.classList.add('open');
+  };
+
+  // Customer opens the page: Resume tracking ALL their active orders
+  if (activeOrders.length > 0) {
+    // Start tracking the latest order visibly, and the rest silently
+    activeOrders.forEach((id, index) => {
+      beginTracking(id, index !== activeOrders.length - 1);
+    });
+  }
+
+} // end of initCustomerUI
 
 if (document.getElementById('cartui') && isConfigured()) initCustomerUI();
