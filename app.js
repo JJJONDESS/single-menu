@@ -125,9 +125,9 @@ export async function submitOrder() {
     jsonrpc: "2.0",
     method: "call",
     params: {
-      db: "YOUR_ODOO_DATABASE_NAME", // ⚠️ Must match your exact local database name!
+      db: "melt9_pos", // ⚠️ Must match your exact local database name!
       login: "landscapewebsitedesign@gmail.com",
-      password: "YOUR_ODOO_LOGIN_PASSWORD", // ⚠️ Must match your actual Odoo login password!
+      password: "Asdfvcxz_01", // ⚠️ Must match your actual Odoo login password!
       model: "pos.order",
       method: "create_from_ui", // Tells Odoo to create a live POS ticket
       args: [[{
