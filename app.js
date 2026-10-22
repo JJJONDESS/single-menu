@@ -109,59 +109,26 @@ window.addEventListener('storage', e => { if (e.key === CART_KEY) { cart = loadC
 // ----------------------------------------------------------------------------
 const withTimeout = (p, ms, msg) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(msg)), ms))]);
 
-// Paste this connection block straight into your app.js submitOrder function:
 export async function submitOrder() {
   const items = cart.map(i => {
-    return [0, 0, {
-      product_id: i.id, // Must match the internal reference string in Odoo exactly
-      qty: i.qty
-    }];
+    const live = priceOf(dishOf(i.id)) || i.price;                 // use the current price from dishes.js
+    return { dish_id: i.id, dish_name: i.name, qty: i.qty, price: live };
   });
-
   if (!items.length) throw new Error('Your cart is empty.');
-
-  // The EXACT Odoo JSON-RPC system data packet format
-  const odooPayload = {
-    jsonrpc: "2.0",
-    method: "call",
-    params: {
-      db: "melt9_pos", // ⚠️ Must match your exact local database name!
-      login: "landscapewebsitedesign@gmail.com",
-      password: "Asdfvcxz_01", // ⚠️ Must match your actual Odoo login password!
-      model: "pos.order",
-      method: "create_from_ui", // Tells Odoo to create a live POS ticket
-      args: [[{
-        lines: items,
-        table_number: getTable() || "Takeaway",
-        amount_total: cartTotal()
-      }]]
-    },
-    id: Math.floor(Math.random() * 1000)
-  };
-
-  // Double check your clean ngrok url parameter injection
-  const response = await fetch("https://overprice-carless-commute.ngrok-free.dev/jsonrpc", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(odooPayload)
-  });
-
-  if (!response.ok) {
-    throw new Error("POS Connection failed.");
-  }
-
-  const data = await response.json();
-  
-  if (data.error) {
-    console.error("Odoo specific validation failure:", data.error);
-    throw new Error(data.error.message);
-  }
-
-  try { localStorage.setItem('arm_order_id', 'local_' + Date.now()); } catch (e) {}
+  const total = items.reduce((s, i) => s + i.qty * i.price, 0);
+  const { db, F } = await getDb();
+  const ref = await withTimeout(F.addDoc(F.collection(db, 'orders'), {
+    table_number: getTable(),
+    items,
+    total_bill: total,
+    status: 'pending',
+    assigned_employee: null,
+    timestamp: F.serverTimestamp()
+  }), 30000, 'We could not confirm your order. Please check your internet and ask your waiter before ordering again.');
+  try { sessionStorage.setItem('arm_order_id', ref.id); } catch (e) {}
   clearCart();
-  return true;
+  return ref.id;
 }
-
 
 // Live status of one order (pending -> processing -> served -> completed)
 let stopTracking = null;
