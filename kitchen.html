@@ -219,7 +219,25 @@ function render() {
       ul.append(li);
     });
     t.append(ul);
-    const total = el('div', 'tk-total'); total.append(el('span', '', 'Total'), el('span', '', money(Number(o.total_bill) || 0)));
+    // HACK-PROOF VALIDATION: Calculate the real price on the Kitchen side
+let realTotal = 0;
+(o.items || []).forEach(i => {
+  // Look up the true price from dishes.js
+  const dish = window.DISHES && window.DISHES[i.dish_id];
+  const truePrice = dish ? parseFloat(String(dish.price).replace(/[^\d.]/g, '')) : i.price;
+  realTotal += truePrice * i.qty;
+});
+
+// If the customer tampered with the price, show a warning
+if (o.total_bill && Math.abs(o.total_bill - realTotal) > 1) {
+  const warn = el('div', '', '⚠️ Price Tampered!');
+  warn.style.color = 'red';
+  warn.style.fontWeight = 'bold';
+  t.append(warn);
+}
+
+const total = el('div', 'tk-total'); 
+total.append(el('span', '', 'Total'), el('span', '', money(realTotal)));
     t.append(total, el('div', 'tk-who', o.assigned_employee ? 'Served by ' + o.assigned_employee : ''));
 
     const err = el('div', 'tk-err');
